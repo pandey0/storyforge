@@ -348,6 +348,11 @@ async def run_tts(slug: str):
         )
         agent.run(state)
         log.info("TTSAgent complete")
+
+        from src.agents.audio_validator import validate_audio
+        passed, notes = validate_audio(state.case_id, slug, track="longform")
+        log.info(f"Audio validation: passed={passed} notes={notes}")
+
         update_job(slug, "running", progress=100)
 
     t = threading.Thread(target=_run_in_thread, args=(_run, slug, "tts", log), daemon=True)
@@ -590,6 +595,14 @@ async def run_shorts_tts(slug: str, topic: Optional[str] = None):
             if timings_src.exists():
                 shutil.copy(str(timings_src), str(shorts_dir / f"{stem}_timings.json"))
             log.info(f"TTS done for episode {i + 1}/{len(md_files)}: {stem}")
+
+            # episode stem is "ep{NN}_{topic}" — strip the "ep{NN}_" prefix to get topic
+            stem_parts = stem.split("_", 1)
+            ep_topic = stem_parts[1] if len(stem_parts) == 2 and stem_parts[0].startswith("ep") else stem
+            from src.agents.audio_validator import validate_audio
+            passed, notes = validate_audio(state.case_id, slug, track="shorts", topic=ep_topic)
+            log.info(f"Audio validation [{ep_topic}]: passed={passed} notes={notes}")
+
             update_job(slug, "running", progress=5 + int(90 * (i + 1) / len(md_files)))
 
         log.info("Shorts TTS complete")

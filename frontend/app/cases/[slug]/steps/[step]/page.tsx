@@ -6,6 +6,7 @@ import { api, ConfigField, CheckpointStatus } from '@/lib/api'
 import { useStepConfig, useCaseFiles, useCaseVersions, useCase, useJob, useCharacters, useCheckpoint, useResearch } from '@/lib/swr-hooks'
 import { LiveTerminal } from '@/components/LiveTerminal'
 import { SkeletonCard } from '@/components/Skeleton'
+import { AudioSegmentList } from '@/components/AudioSegmentList'
 import { ORDERED_PIPELINE, STEP_PREREQ, NEXT_STEP, STEP_LABEL, getStepIndex } from '@/lib/pipeline'
 import { mutate } from 'swr'
 
@@ -1079,6 +1080,12 @@ function AudioEditor({ slug, sizeLine }: { slug: string; sizeLine: string }) {
           </audio>
         </div>
       )}
+
+      {/* Per-segment replace + checkpoint approve/reject */}
+      <div className="rounded-xl border border-[#222] bg-[#0a0a0a] p-4">
+        <div className="text-[10px] text-[#555] uppercase tracking-wider font-medium mb-3">Segments</div>
+        <AudioSegmentList slug={slug} track="longform" />
+      </div>
     </div>
   )
 }

@@ -238,4 +238,34 @@ export const api = {
     apiFetch(`/api/checkpoints/${slug}/${step}/approve`, { method: 'POST' }),
   rejectCheckpoint: (slug: string, step: string, notes?: string) =>
     apiFetch(`/api/checkpoints/${slug}/${step}/reject`, { method: 'POST', body: JSON.stringify({ notes: notes ?? '' }) }),
+
+  replaceAudioSegment: (
+    slug: string,
+    segmentIdx: number,
+    file: File,
+    track: 'longform' | 'shorts' = 'longform',
+    topic?: string
+  ): Promise<{
+    replaced: boolean
+    segment_idx: number
+    old_duration: number
+    new_duration: number
+    delta_sec: number
+    total_duration: number
+    validation: { passed: boolean; notes: string }
+  }> => {
+    const form = new FormData()
+    form.append('file', file)
+    const qs = new URLSearchParams({ track, ...(topic ? { topic } : {}) })
+    return fetch(`${API}/api/audio-segments/${slug}/${segmentIdx}/replace?${qs.toString()}`, {
+      method: 'POST',
+      body: form,
+    }).then(async res => {
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(`${res.status} ${res.statusText} — ${JSON.stringify(body)}`)
+      }
+      return res.json()
+    })
+  },
 }

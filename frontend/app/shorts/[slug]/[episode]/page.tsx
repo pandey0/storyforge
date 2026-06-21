@@ -6,6 +6,7 @@ import { useCase, useCaseFiles, useShortsPlan } from '@/lib/swr-hooks'
 import { LiveTerminal } from '@/components/LiveTerminal'
 import { SkeletonCard } from '@/components/Skeleton'
 import { EditDecisionListEditor } from '@/components/EditDecisionListEditor'
+import { AudioSegmentList } from '@/components/AudioSegmentList'
 import { SHORTS_EPISODE_STEPS, topicFileMatch } from '@/lib/pipeline'
 
 const ACCENT = '#22c55e'
@@ -112,9 +113,14 @@ export default function ShortsEpisodePage({ params }: { params: Promise<{ slug: 
             onRun={() => runStep('shorts_tts')}
           >
             {audioFilename ? (
-              <audio controls className="w-full" style={{ filter: 'invert(0.9) hue-rotate(180deg)' }}>
-                <source src={`${API_BASE}/files/cases/${slug}/shorts/${audioFilename}`} type="audio/mpeg" />
-              </audio>
+              <>
+                <audio controls className="w-full" style={{ filter: 'invert(0.9) hue-rotate(180deg)' }}>
+                  <source src={`${API_BASE}/files/cases/${slug}/shorts/${audioFilename}`} type="audio/mpeg" />
+                </audio>
+                <div className="mt-3 pt-3 border-t border-[#1e1e1e]">
+                  <AudioSegmentList slug={slug} track="shorts" topic={episode} timingsFilename={audioFilename} />
+                </div>
+              </>
             ) : (
               <EmptyHint text="No audio yet for this episode." />
             )}

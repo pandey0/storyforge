@@ -69,6 +69,33 @@ export function useShortsPlan(slug: string) {
   return { plan: (data ?? null) as EpisodeCard[] | null, error, isLoading, mutate }
 }
 
+export interface WordTimingSegment {
+  segment_idx: number
+  section: string
+  text_preview: string
+  start_sec: number
+  end_sec: number
+}
+
+// Longform: data/cases/{slug}/audio/word_timings.json
+// Shorts: data/cases/{slug}/shorts/ep{NN}_{topic}_timings.json — caller passes
+// the exact filename (resolved from useCaseFiles' shorts_audio listing) since
+// the episode number prefix isn't known client-side ahead of time.
+export function useWordTimings(slug: string, track: 'longform' | 'shorts', filename?: string) {
+  const path = track === 'longform'
+    ? `audio/word_timings.json`
+    : filename ? `shorts/${filename}` : null
+  const key = slug && path ? `word_timings:${slug}:${path}` : null
+  const { data, error, isLoading, mutate } = useSWR(
+    key,
+    () => fetch(`${API_BASE}/files/cases/${slug}/${path}`)
+      .then(r => (r.ok ? r.json() : null))
+      .catch(() => null),
+    { revalidateOnFocus: false }
+  )
+  return { timings: (data ?? null) as WordTimingSegment[] | null, error, isLoading, mutate }
+}
+
 export function useCaseFiles(slug: string) {
   const { data, error, isLoading, mutate } = useSWR(
     slug ? `files:${slug}` : null,
