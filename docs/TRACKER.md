@@ -824,6 +824,95 @@ mistakes don't recur:
 
 ---
 
+## PHASE 21 — Human<->AI Validation Checkpoints (every step, not just script)
+
+User audit: each pipeline step had independently reinvented (or skipped)
+override/validation — script had manual-override + QA but loosely coupled,
+characters had full CRUD but zero validation, research/audio/EDL/post-render
+had nothing at all. Fix: one generic checkpoint primitive every step plugs
+into, instead of N bespoke patterns. Repo git-initialized first (was
+untracked) given the scope — see `git log` for the per-phase commit trail
+(21A baseline through 21G), each phase independently compile-verified before
+the next started.
+
+### 21A. Generic checkpoint foundation [x]
+- [x] `step_checkpoints` DB table (case_id, step, status, edited_by,
+      validation_notes, updated_at) — `src/db/models.py` `StepCheckpoint`
+- [x] `src/pipeline/checkpoints.py` — get/list/mark_ai_generated/
+      mark_human_edited/mark_ai_validated/mark_human_approved/
+      mark_human_rejected/is_approved. Every other phase calls these instead
+      of inventing its own state.
+- [x] Generic routes `src/api/routes/checkpoints.py` — GET (list/single),
+      POST approve/reject. Step-specific validate logic lives in each step's
+      own agent/route, not here.
+
+### 21B. Research [x]
+- [x] Dead config (`extra_terms`/`year_from`/`year_to`/`force_urls`) removed
+      from `steps.py` — scrapers never accepted these params, wiring them
+      would've been fake. No silent caps: removed with an explanatory comment,
+      not silently ignored.
+- [x] `research_manual.json` override (mirrors `script_manual.md` priority
+      pattern) + `src/pipeline/research_loader.py` shared by ALL FIVE
+      consumers (script_writer, episode_planner, shorts_script, character,
+      publish agents) so the override actually takes effect everywhere
+- [x] `src/agents/research_validator.py` — structural sanity check always;
+      Gemini coherence check added only when last edit was human
+- [x] Frontend: editable JSON textarea replacing the old read-only preview,
+      validate/approve/reject wired to the generic checkpoint
+
+### 21C. Characters [x]
+- [x] Existing CRUD (add/edit/delete/photo) now calls `mark_human_edited`
+- [x] `src/agents/character_validator.py` — Gemini checks each character's
+      role still plausibly fits the research context
+- [x] Advisory-only gate: `scene_image_agent.py` / `shorts_assembler_agent.py`
+      log a warning when characters aren't `human_approved` — never blocks
+
+### 21D. Script — closed the existing loophole [x]
+- [x] Manual save auto-reruns QA instead of marking "stale" and waiting for
+      the operator to remember; `qa_result` returned inline from the save call
+- [x] AI-fix regeneration also auto-reruns QA (was previously silent)
+- [x] Approve gate now HARD-blocks (400) unless the script checkpoint is
+      `ai_validated` since the last edit — closes "approve immediately after
+      editing with stale/no QA" loophole found during the audit
+
+### 21E. Audio [x]
+- [x] `src/agents/audio_validator.py` — deterministic ffprobe/ffmpeg checks
+      (duration vs. word-count estimate, silence gaps >5s, loudness range),
+      no LLM needed; wired into both `run_tts` and `run_shorts_tts`
+- [x] `POST /api/audio-segments/{slug}/{segment_idx}/replace` — splices a
+      replacement clip into one `word_timings.json` segment's window, shifts
+      all downstream segment timings by the duration delta so captions stay
+      in sync
+- [x] EDL deliberately NOT touched — audio segment replace is a separate
+      mechanism from EDL's visual broll/photo/scene-image source selection
+
+### 21F. Visual EDL [x]
+- [x] Upload capability added (previously pick-existing-asset only)
+- [x] `src/agents/edl_validator.py` — Gemini Vision description + fit-check
+      for image overrides; ffprobe existence/validity check for video (full
+      content validation on video too expensive/unreliable, by design)
+- [x] **Lock-in gate**: `PUT /edl/{slug}` still saves immediately but no
+      longer takes effect at render time until explicitly approved.
+      `get_segment_override(edl, segment_id, slug)` returns `None` unless
+      the case's `edl` checkpoint is exactly `human_approved` — regression-
+      checked: a case that never touches the EDL editor takes the
+      `edl is None` fast path before any DB/checkpoint lookup, zero behavior
+      change for the common no-override case.
+
+### 21G. Post-render [x]
+- [x] `PUT /{slug}/thumbnail/replace` — swaps thumbnail.jpg directly
+      (validates real image, matches ThumbnailAgent's exact 1280x720 JPEG
+      contract + DB field) without re-running DALL-E
+- [x] `POST /{slug}/unpublish` — local dashboard-state rollback only
+      (published → ready); comment block in code explicitly notes it never
+      touches `publish_agent.py` or the YouTube API — operator must unpublish
+      on YouTube Studio separately if needed
+- [x] Full video patch-editing (trim/replace a piece of a rendered mp4
+      without re-running the whole ffmpeg-concat assembly) explicitly flagged
+      as future work, not attempted — real architecture problem, not a quick win
+
+---
+
 ## Decisions Log
 
 | Date | Decision | Reason |
