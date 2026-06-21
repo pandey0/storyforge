@@ -88,6 +88,12 @@ async def save_script(slug: str, body: ScriptSaveBody):
     """
     Save text to script_manual.md — this will take priority over AI-generated drafts.
     Also inserts/updates the Script DB row.
+
+    After saving, marks the script checkpoint as human_edited then immediately
+    re-runs QAAgent synchronously and records the result as ai_validated/
+    ai_flagged — so a manual edit never leaves a stale/passing QA result sitting
+    on a script the operator hasn't actually re-checked (see approve_gate's
+    checkpoint-status guard in pipeline.py, which depends on this being fresh).
     """
     def _save():
         # Verify case exists
@@ -95,6 +101,9 @@ async def save_script(slug: str, body: ScriptSaveBody):
             case = session.query(Case).filter(Case.slug == slug).first()
             if not case:
                 return None, "not_found"
+            case_id = str(case.id)
+            case_name = case.name
+            case_status = case.status
 
         # Write file
         base = Path(f"data/cases/{slug}")
@@ -131,11 +140,36 @@ async def save_script(slug: str, body: ScriptSaveBody):
                 session.add(row)
             session.flush()
 
+        from src.pipeline.checkpoints import mark_ai_validated, mark_human_edited
+        mark_human_edited(case_id, "script", notes=None)
+
+        # Auto re-run QA synchronously — scripts are short text, no need to
+        # background-thread this. Failure to run QA shouldn't fail the save.
+        qa_result = None
+        try:
+            from src.agents.qa_agent import QAAgent
+            from src.pipeline.state import CaseState
+
+            state = CaseState(
+                case_id=case_id,
+                slug=slug,
+                name=case_name,
+                status=case_status,
+                draft_script_path=str(manual_path),
+            )
+            passed, notes = QAAgent().run(state)
+            mark_ai_validated(case_id, "script", passed, notes=notes)
+            qa_result = {"passed": passed, "notes": notes}
+        except Exception as exc:  # pragma: no cover - defensive, QA is best-effort here
+            qa_result = {"passed": False, "notes": f"QA run failed: {exc}"}
+            mark_ai_validated(case_id, "script", False, notes=qa_result["notes"])
+
         return {
             "saved": True,
             "path": str(manual_path),
             "word_count": wc,
             "duration_est_min": duration_est,
+            "qa_result": qa_result,
         }, None
 
     result, err = await asyncio.to_thread(_save)

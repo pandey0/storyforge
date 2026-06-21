@@ -227,6 +227,8 @@ async def run_script(slug: str):
 
     def _run():
         from src.agents.script_writer_agent import ScriptWriterAgent
+        from src.agents.qa_agent import QAAgent
+        from src.pipeline.checkpoints import mark_ai_validated
         log.info("Building CaseState")
         state = _build_state(slug)
         if not state.research_path:
@@ -236,6 +238,17 @@ async def run_script(slug: str):
         agent = ScriptWriterAgent()
         agent.run(state)
         log.info("ScriptWriterAgent complete")
+        update_job(slug, "running", progress=90)
+
+        # AI-generated content (including AI "fix" reruns triggered by QA notes)
+        # needs AI-validation before it's presented to the human for approval —
+        # same principle as the auto-revalidate-on-manual-edit path in scripts.py.
+        log.info("Running QAAgent on freshly generated script")
+        qa_state = _build_state(slug)
+        if qa_state.draft_script_path:
+            passed, notes = QAAgent().run(qa_state)
+            mark_ai_validated(qa_state.case_id, "script", passed, notes=notes)
+            log.info(f"QA result: passed={passed} notes={notes}")
         update_job(slug, "running", progress=100)
 
     t = threading.Thread(target=_run_in_thread, args=(_run, slug, "script", log), daemon=True)
@@ -268,11 +281,16 @@ async def run_qa(slug: str):
         from dotenv import load_dotenv
         load_dotenv()
         from src.agents.qa_agent import QAAgent
+        from src.pipeline.checkpoints import mark_ai_validated
         state = _build_state(slug)
         if not state.draft_script_path:
             raise ValueError("No script found — run script step first")
         agent = QAAgent()
         passed, notes = agent.run(state)
+        # Manual "Run QA" clicks must update the checkpoint too, not just the
+        # auto-triggered QA in scripts.py's save_script — approve_gate's guard
+        # checks this checkpoint regardless of which path last ran QA.
+        mark_ai_validated(state.case_id, "script", passed, notes=notes)
         return passed, notes
 
     try:
@@ -719,7 +737,14 @@ async def run_thumbnail(slug: str):
 
 @router.post("/{slug}/approve")
 async def approve_step(slug: str):
-    """Advance case status to the next step in the pipeline."""
+    """Advance case status to the next step in the pipeline.
+
+    Gate: when the case is leaving human_review (i.e. the script gate), the
+    script's checkpoint must be "ai_validated" — meaning QA has actually run
+    against whatever is currently saved (manual edit or AI draft) and passed.
+    A checkpoint that is missing, still "human_edited" (edited but not
+    re-validated), or "ai_flagged" (validation ran and failed) blocks approval.
+    """
     import asyncio
 
     from src.db.models import Case
@@ -733,14 +758,31 @@ async def approve_step(slug: str):
             next_st = _next_status(case.status)
             if next_st is None:
                 return None, f"No next status after '{case.status}'"
+
+            from src.pipeline.checkpoints import get_checkpoint, mark_human_approved
+
+            if case.status == "human_review":
+                cp = get_checkpoint(str(case.id), "script")
+                if not cp or cp.get("status") != "ai_validated":
+                    return None, (
+                        "qa_required:Script must pass QA since the last edit "
+                        "before approving — run QA first"
+                    )
+
             prev = case.status
             case.status = next_st
             session.flush()
+
+            if prev == "human_review":
+                mark_human_approved(str(case.id), "script")
+
             return {"slug": slug, "previous_status": prev, "new_status": next_st}, None
 
     data, err = await asyncio.to_thread(_do)
     if err and "not found" in err:
         raise HTTPException(status_code=404, detail=err)
+    if err and err.startswith("qa_required:"):
+        raise HTTPException(status_code=400, detail=err.split(":", 1)[1])
     if err:
         raise HTTPException(status_code=400, detail=err)
     invalidate_slug(slug)
@@ -764,8 +806,14 @@ async def reject_step(slug: str):
             if prev_st is None:
                 return None, f"No previous status before '{case.status}'"
             prev = case.status
+            case_id = str(case.id)
             case.status = prev_st
             session.flush()
+
+            if prev == "human_review":
+                from src.pipeline.checkpoints import mark_human_rejected
+                mark_human_rejected(case_id, "script", notes=None)
+
             return {"slug": slug, "previous_status": prev, "new_status": prev_st}, None
 
     data, err = await asyncio.to_thread(_do)

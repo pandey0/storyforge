@@ -3,7 +3,7 @@ import { use, useState, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { api } from '@/lib/api'
-import { useScript, useCase } from '@/lib/swr-hooks'
+import { useScript, useCase, useCheckpoint } from '@/lib/swr-hooks'
 import { mutate } from 'swr'
 
 type QAResult = { passed: boolean; notes: string[] }
@@ -14,6 +14,7 @@ export default function ReviewPage({ params }: { params: Promise<{ slug: string 
   const router = useRouter()
   const { script, isLoading, mutate: mutateScript } = useScript(slug)
   const { caseData } = useCase(slug)
+  const { checkpoint, mutate: mutateCheckpoint } = useCheckpoint(slug, 'script')
 
   const [qaRunning, setQaRunning] = useState(false)
   const [qaResult, setQaResult] = useState<QAResult | null>(null)
@@ -34,6 +35,19 @@ export default function ReviewPage({ params }: { params: Promise<{ slug: string 
   const estMinutes = Math.round(wordCount / 130)
   const isGatePassed = caseData?.status &&
     !['queued', 'research', 'scripting', 'human_review'].includes(caseData.status)
+  // Approve is only safe once QA has actually run against whatever is
+  // currently saved — mirrors the server-side guard in pipeline.py's
+  // approve_step (checkpoint status must be "ai_validated").
+  const qaValidated = checkpoint?.status === 'ai_validated'
+  const approveDisabledReason = isGatePassed
+    ? null
+    : !scriptText
+    ? null
+    : !qaValidated
+    ? (checkpoint?.status === 'ai_flagged'
+        ? 'QA flagged issues — fix and re-run QA before approving'
+        : 'Run QA first — script has unvalidated changes')
+    : null
 
   const enterEdit = () => {
     setEditText(scriptText)
@@ -49,15 +63,27 @@ export default function ReviewPage({ params }: { params: Promise<{ slug: string 
   const saveEdit = useCallback(async () => {
     setSaving(true)
     try {
-      await api.saveScript(slug, editText)
+      const res = await api.saveScript(slug, editText)
       mutateScript()
-      showMsg('Saved as manual override ✓')
+      mutateCheckpoint()
+      // Backend auto-reruns QA on every manual save now — use that result
+      // directly instead of clearing and waiting for a manual "Run QA" click.
+      if (res.qa_result) {
+        const notes = res.qa_result.notes
+        setQaResult({
+          passed: res.qa_result.passed,
+          notes: Array.isArray(notes) ? notes : [notes].filter(Boolean),
+        })
+        showMsg(res.qa_result.passed ? 'Saved & QA passed ✓' : 'Saved — QA found issues')
+      } else {
+        setQaResult(null)
+        showMsg('Saved as manual override ✓')
+      }
       setMode('read')
-      setQaResult(null) // stale — needs re-run
     } finally {
       setSaving(false)
     }
-  }, [slug, editText, mutateScript])
+  }, [slug, editText, mutateScript, mutateCheckpoint])
 
   const runQA = useCallback(async () => {
     if (qaRunning) return  // idempotent guard
@@ -66,12 +92,13 @@ export default function ReviewPage({ params }: { params: Promise<{ slug: string 
       const res = await api.runStep(slug, 'qa') as { passed: boolean; notes: string | string[] }
       const notes = Array.isArray(res.notes) ? res.notes : [res.notes].filter(Boolean)
       setQaResult({ passed: res.passed, notes })
+      mutateCheckpoint()
     } catch (e) {
       setQaResult({ passed: false, notes: [`QA failed: ${e}`] })
     } finally {
       setQaRunning(false)
     }
-  }, [slug, qaRunning])
+  }, [slug, qaRunning, mutateCheckpoint])
 
   // AI fix: saves QA notes to script config then reruns script agent
   const fixWithAI = useCallback(async () => {
@@ -86,14 +113,15 @@ export default function ReviewPage({ params }: { params: Promise<{ slug: string 
       await api.runStep(slug, 'script')
       showMsg('Script agent running with QA fix instructions…')
       setQaResult(null)
-      // Poll for script update
-      setTimeout(() => { mutateScript(); mutate(`case:${slug}`) }, 8000)
+      // Poll for script update — the rerun route now auto-runs QA itself when
+      // it finishes, so refresh the checkpoint alongside the script/case data.
+      setTimeout(() => { mutateScript(); mutate(`case:${slug}`); mutateCheckpoint() }, 8000)
     } catch (e) {
       showMsg(`Fix failed: ${e}`)
     } finally {
       setFixing(false)
     }
-  }, [slug, qaResult, mutateScript])
+  }, [slug, qaResult, mutateScript, mutateCheckpoint])
 
   const approve = useCallback(async () => {
     if (approving || isGatePassed) return  // idempotent guard
@@ -104,11 +132,20 @@ export default function ReviewPage({ params }: { params: Promise<{ slug: string 
       showMsg(`Approved ✓ → ${res?.new_status ?? 'tts'}`)
       setTimeout(() => router.push(`/cases/${slug}/steps/tts?from=longform`), 1500)
     } catch (e) {
-      showMsg(`Approve failed: ${e}`)
+      const message = e instanceof Error ? e.message : String(e)
+      if (message.startsWith('400')) {
+        // Server-side QA-before-approve guard tripped — surface its detail
+        // text directly rather than the raw "400 Bad Request — {...}" string.
+        const match = message.match(/detail":\s*"([^"]+)"/)
+        showMsg(match ? match[1] : 'Run QA first — script has unvalidated changes')
+      } else {
+        showMsg(`Approve failed: ${message}`)
+      }
+      mutateCheckpoint()
     } finally {
       setApproving(false)
     }
-  }, [slug, router, approving, isGatePassed])
+  }, [slug, router, approving, isGatePassed, mutateCheckpoint])
 
   const reject = useCallback(async () => {
     if (rejecting) return  // idempotent guard
@@ -116,6 +153,7 @@ export default function ReviewPage({ params }: { params: Promise<{ slug: string 
     try {
       await api.rejectGate(slug)
       mutate(`case:${slug}`)
+      mutateCheckpoint()
       showMsg('Rejected — back to scripting')
       setTimeout(() => router.push(`/cases/${slug}/steps/script?from=longform`), 1500)
     } catch (e) {
@@ -123,7 +161,7 @@ export default function ReviewPage({ params }: { params: Promise<{ slug: string 
     } finally {
       setRejecting(false)
     }
-  }, [slug, router, rejecting])
+  }, [slug, router, rejecting, mutateCheckpoint])
 
   return (
     <div className="flex flex-col" style={{ minHeight: '100vh' }}>
@@ -198,7 +236,8 @@ export default function ReviewPage({ params }: { params: Promise<{ slug: string 
                 </button>
                 <button
                   onClick={approve}
-                  disabled={approving || !scriptText}
+                  disabled={approving || !scriptText || !qaValidated}
+                  title={approveDisabledReason ?? undefined}
                   className="px-4 py-1.5 rounded-lg text-xs font-medium"
                   style={{ backgroundColor: '#052010', color: '#22c55e', border: '1px solid #22c55e44' }}
                 >
@@ -215,6 +254,9 @@ export default function ReviewPage({ params }: { params: Promise<{ slug: string 
             <span>{wordCount.toLocaleString()} words</span>
             <span>~{estMinutes} min</span>
             {mode === 'edit' && <span className="text-[#f59e0b]">editing — unsaved</span>}
+            {mode === 'read' && approveDisabledReason && (
+              <span className="text-[#f59e0b]">⚠ {approveDisabledReason}</span>
+            )}
           </div>
         )}
       </div>
@@ -303,7 +345,13 @@ export default function ReviewPage({ params }: { params: Promise<{ slug: string 
           className="px-6 py-4 flex-shrink-0 flex items-center justify-between border-t border-[#222]"
           style={{ backgroundColor: '#0a0a0a' }}
         >
-          <span className="text-xs text-[#555]">Done reading? Choose your verdict.</span>
+          <span className="text-xs text-[#555]">
+            {approveDisabledReason ? (
+              <span className="text-[#f59e0b]">⚠ {approveDisabledReason}</span>
+            ) : (
+              'Done reading? Choose your verdict.'
+            )}
+          </span>
           <div className="flex gap-3">
             <button
               onClick={reject}
@@ -315,7 +363,8 @@ export default function ReviewPage({ params }: { params: Promise<{ slug: string 
             </button>
             <button
               onClick={approve}
-              disabled={approving}
+              disabled={approving || !qaValidated}
+              title={approveDisabledReason ?? undefined}
               className="px-5 py-2 rounded-lg text-sm font-medium"
               style={{ backgroundColor: '#052010', color: '#22c55e', border: '1px solid #22c55e44' }}
             >

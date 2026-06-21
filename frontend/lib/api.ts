@@ -153,8 +153,16 @@ export const api = {
     apiFetch(`/api/pipeline/${slug}/job`).catch(() => null),
 
   getScript: (slug: string) => apiFetch(`/api/scripts/${slug}`),
-  saveScript: (slug: string, text: string) =>
-    apiFetch(`/api/scripts/${slug}`, { method: 'PUT', body: JSON.stringify({ text }) }),
+  saveScript: (
+    slug: string,
+    text: string
+  ): Promise<{
+    saved: boolean
+    path: string
+    word_count: number
+    duration_est_min: number
+    qa_result: { passed: boolean; notes: string } | null
+  }> => apiFetch(`/api/scripts/${slug}`, { method: 'PUT', body: JSON.stringify({ text }) }),
   deleteManualScript: (slug: string) =>
     apiFetch(`/api/scripts/${slug}/manual`, { method: 'DELETE' }),
 
