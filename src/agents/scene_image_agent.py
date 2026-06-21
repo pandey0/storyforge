@@ -42,9 +42,11 @@ class SceneImageAgent:
         if not self._openrouter_available():
             return []
 
-        md_path = Path(f"data/cases/{slug}/shorts/{topic_slug}.md")
-        if not md_path.exists():
-            logger.warning("Episode script not found: {}", md_path)
+        md_path = self._find_script_file(slug, topic_slug)
+        if md_path is None:
+            logger.warning(
+                "Episode script not found for topic={!r} in case={!r}", topic_slug, slug
+            )
             return []
 
         script_text = md_path.read_text(encoding="utf-8")
@@ -117,6 +119,22 @@ class SceneImageAgent:
     # ------------------------------------------------------------------
     # Segment loading — mirrors shorts_assembler_agent's lookup style
     # ------------------------------------------------------------------
+
+    def _find_script_file(self, slug: str, topic_slug: str) -> Optional[Path]:
+        """
+        Episode scripts are saved as 'ep01_{topic_slug}.md' (see
+        shorts_script_agent.py), but section_slug (passed in here as
+        topic_slug) has that episode-number prefix already stripped — same
+        convention shorts_assembler_agent.py's _section_slug_from_stem uses.
+        Try the bare name first for any caller that already has the full
+        stem, then fall back to globbing for the real prefixed filename.
+        """
+        shorts_dir = Path(f"data/cases/{slug}/shorts")
+        direct = shorts_dir / f"{topic_slug}.md"
+        if direct.exists():
+            return direct
+        matches = sorted(shorts_dir.glob(f"*_{topic_slug}.md"))
+        return matches[0] if matches else None
 
     def _find_timings_file(self, md_path: Path) -> Optional[Path]:
         stem = md_path.stem
