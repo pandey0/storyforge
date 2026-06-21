@@ -14,6 +14,7 @@ from slugify import slugify
 from src.db.models import Case, CaseResearch
 from src.db.session import get_session
 from src.pipeline.state import CaseState
+from src.scrapers.google_search import GoogleSearchClient
 from src.scrapers.indian_kanoon import IndianKanoonClient
 from src.scrapers.news_api import NewsAPIClient
 
@@ -28,6 +29,7 @@ class CaseResearchAgent:
     def __init__(self) -> None:
         self._ik_client = IndianKanoonClient()
         self._news_client = NewsAPIClient()
+        self._web_client = GoogleSearchClient()
         self._http = httpx.Client(
             timeout=30,
             headers={"User-Agent": "IndianCrimeChannel-Research/1.0"},
@@ -47,6 +49,7 @@ class CaseResearchAgent:
 
             ik_results: list[dict] = []
             news_results: list[dict] = []
+            web_results: list[dict] = []
             wiki_data: Optional[dict] = None
 
             try:
@@ -60,18 +63,23 @@ class CaseResearchAgent:
                 logger.error("_search_news_archive failed: {}", exc)
 
             try:
+                web_results = self._search_web(case.name)
+            except Exception as exc:
+                logger.error("_search_web failed: {}", exc)
+
+            try:
                 wiki_data = self._fetch_wikipedia(case.name)
             except Exception as exc:
                 logger.error("_fetch_wikipedia failed: {}", exc)
 
-            if not ik_results and not news_results and wiki_data is None:
+            if not ik_results and not news_results and not web_results and wiki_data is None:
                 logger.warning(
                     "All external sources returned empty for slug={!r} — proceeding with case DB info only",
                     slug,
                 )
 
             try:
-                synthesized = self._synthesize_summary(case, ik_results, news_results, wiki_data)
+                synthesized = self._synthesize_summary(case, ik_results, news_results, web_results, wiki_data)
             except Exception as exc:
                 logger.error("_synthesize_summary failed: {}", exc)
                 synthesized = {}
@@ -83,6 +91,9 @@ class CaseResearchAgent:
                 "sources": {
                     "indian_kanoon": ik_results,
                     "news_archive": news_results,
+                    # General web search (Google Custom Search) — niche-agnostic,
+                    # unlike indian_kanoon (India court judgments only).
+                    "general_web": web_results,
                     "wikipedia": wiki_data or {},
                     "cbi_press": [],
                 },
@@ -108,6 +119,8 @@ class CaseResearchAgent:
                 all_items.append({"source_type": "indian_kanoon", **item})
             for item in news_results:
                 all_items.append({"source_type": "news_archive", **item})
+            for item in web_results:
+                all_items.append({"source_type": "general_web", **item})
             if wiki_data:
                 all_items.append({"source_type": "wikipedia", **wiki_data})
 
@@ -117,9 +130,10 @@ class CaseResearchAgent:
             session.commit()
 
             logger.info(
-                "Research complete: {} Indian Kanoon, {} news, wikipedia={}",
+                "Research complete: {} Indian Kanoon, {} news, {} web, wikipedia={}",
                 len(ik_results),
                 len(news_results),
+                len(web_results),
                 wiki_data is not None,
             )
 
@@ -132,6 +146,7 @@ class CaseResearchAgent:
         case: Case,
         ik_results: list[dict],
         news_results: list[dict],
+        web_results: list[dict],
         wiki_data: Optional[dict],
     ) -> dict:
         """
@@ -152,18 +167,19 @@ class CaseResearchAgent:
         if wiki_data:
             wiki_text = wiki_data.get("extract_full") or wiki_data.get("extract_summary") or ""
 
+        if not ik_results and not news_results and not web_results and not wiki_text:
+            return {}
+
         sources_text = json.dumps(
             {
                 "indian_kanoon": ik_results[:10],
                 "news_archive": news_results[:10],
+                "general_web": web_results[:10],
                 "wikipedia_extract": wiki_text[:6000],
             },
             ensure_ascii=False,
             indent=2,
         )
-
-        if not sources_text.strip("{}\n ") or sources_text.strip() == '{\n  "indian_kanoon": [],\n  "news_archive": [],\n  "wikipedia_extract": ""\n}':
-            return {}
 
         prompt = (
             f"You are building a structured research summary for a documentary "
@@ -239,6 +255,12 @@ class CaseResearchAgent:
         logger.info("_search_news_archive: case_name={!r}", case_name)
         results = self._news_client.search_case(case_name)
         logger.debug("_search_news_archive: {} results", len(results))
+        return results
+
+    def _search_web(self, case_name: str) -> list[dict]:
+        logger.info("_search_web: case_name={!r}", case_name)
+        results = self._web_client.search_case(case_name, max_results=10)
+        logger.debug("_search_web: {} results", len(results))
         return results
 
     def _fetch_wikipedia(self, case_name: str) -> Optional[dict]:
