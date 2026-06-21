@@ -52,10 +52,9 @@ def _research_context(research: dict) -> str:
     and the card's `angle` to focus itself; no per-topic field mapping.
 
     Matches case_research_agent.py's actual output shape: a `summary` dict
-    (victim/year/location/perpetrator/key_facts/legal_outcome) plus `sources`
-    (indian_kanoon/news_archive/wikipedia/cbi_press lists/dicts) — NOT the
-    flat people_involved/timeline/key_evidence/verdict fields this used to
-    assume, which case_research_agent never actually produces.
+    (subject/year/location/key_entities/key_facts/outcome — generic fields,
+    not crime-specific) plus `sources` (indian_kanoon/news_archive/wikipedia/
+    cbi_press lists/dicts).
     """
     case_name = research.get("case_name", "Unknown Case")
     summary = research.get("summary") or {}
@@ -65,18 +64,21 @@ def _research_context(research: dict) -> str:
 
     if isinstance(summary, dict):
         lines = []
-        if summary.get("victim"):
-            lines.append(f"Victim: {summary['victim']}")
+        if summary.get("subject"):
+            lines.append(f"Subject: {summary['subject']}")
         if summary.get("year"):
             lines.append(f"Year: {summary['year']}")
         if summary.get("location"):
             lines.append(f"Location: {summary['location']}")
-        if summary.get("perpetrator"):
-            lines.append(f"Perpetrator: {summary['perpetrator']}")
+        if summary.get("key_entities"):
+            lines.append(
+                "Key people/entities:\n"
+                + "\n".join(f"- {e.get('name')} ({e.get('role')})" for e in summary["key_entities"])
+            )
         if summary.get("key_facts"):
             lines.append("Key facts:\n" + "\n".join(f"- {f}" for f in summary["key_facts"]))
-        if summary.get("legal_outcome"):
-            lines.append(f"Legal outcome: {summary['legal_outcome']}")
+        if summary.get("outcome"):
+            lines.append(f"Outcome: {summary['outcome']}")
         if lines:
             parts.append("SUMMARY:\n" + "\n".join(lines))
     elif isinstance(summary, str) and summary:

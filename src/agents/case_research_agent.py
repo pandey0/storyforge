@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -69,6 +70,12 @@ class CaseResearchAgent:
                     slug,
                 )
 
+            try:
+                synthesized = self._synthesize_summary(case, ik_results, news_results, wiki_data)
+            except Exception as exc:
+                logger.error("_synthesize_summary failed: {}", exc)
+                synthesized = {}
+
             research: dict = {
                 "case_slug": slug,
                 "case_name": case.name,
@@ -79,13 +86,18 @@ class CaseResearchAgent:
                     "wikipedia": wiki_data or {},
                     "cbi_press": [],
                 },
+                # Generic across any subject (true crime, mythology, history,
+                # etc.) — no crime-specific field names. See docs/SHORTS_FLOW.md
+                # and CLAUDE.md "Niche Is Data Too". key_entities/key_facts/
+                # outcome are filled by _synthesize_summary reading the raw
+                # scraped sources above, not hand-typed at case creation.
                 "summary": {
-                    "victim": case.subject_name or "",
-                    "year": case.year_of_crime,
-                    "location": case.location or "",
-                    "perpetrator": case.extra.get("perpetrator") or "",
-                    "key_facts": [],
-                    "legal_outcome": "",
+                    "subject": synthesized.get("subject") or case.subject_name or case.name or "",
+                    "year": synthesized.get("year") or case.year_of_crime,
+                    "location": synthesized.get("location") or case.location or "",
+                    "key_entities": synthesized.get("key_entities") or [],
+                    "key_facts": synthesized.get("key_facts") or [],
+                    "outcome": synthesized.get("outcome") or "",
                 },
             }
 
@@ -114,6 +126,108 @@ class CaseResearchAgent:
             state = CaseState.from_db_case(case)
             state.research_path = research_path
             return state
+
+    def _synthesize_summary(
+        self,
+        case: Case,
+        ik_results: list[dict],
+        news_results: list[dict],
+        wiki_data: Optional[dict],
+    ) -> dict:
+        """
+        Read the raw scraped sources and produce an actual structured
+        understanding of the case — subject/key_entities/key_facts/outcome —
+        instead of leaving those fields as empty templates. Strictly grounded
+        in the scraped text; told explicitly not to invent facts the sources
+        don't contain. Generic across any subject, not just crime.
+        """
+        import os
+
+        api_key = os.environ.get("GOOGLE_API_KEY")
+        if not api_key:
+            logger.warning("GOOGLE_API_KEY not set — skipping research synthesis")
+            return {}
+
+        wiki_text = ""
+        if wiki_data:
+            wiki_text = wiki_data.get("extract_full") or wiki_data.get("extract_summary") or ""
+
+        sources_text = json.dumps(
+            {
+                "indian_kanoon": ik_results[:10],
+                "news_archive": news_results[:10],
+                "wikipedia_extract": wiki_text[:6000],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
+        if not sources_text.strip("{}\n ") or sources_text.strip() == '{\n  "indian_kanoon": [],\n  "news_archive": [],\n  "wikipedia_extract": ""\n}':
+            return {}
+
+        prompt = (
+            f"You are building a structured research summary for a documentary "
+            f"about: {case.name!r}. The subject can be ANYTHING — a crime case, "
+            f"a historical event, a mythological story, a biography — do not "
+            f"assume it's a crime.\n\n"
+            "Read the raw sources below and extract ONLY what they actually "
+            "contain. Do not invent or guess facts the sources don't support. "
+            "If the sources are thin or empty, return short/empty values rather "
+            "than fabricating content.\n\n"
+            "Respond with ONLY a JSON object, no markdown fences, with exactly "
+            "these keys:\n"
+            '  "subject": one-sentence description of who/what this case is about\n'
+            '  "year": the year this happened, as an integer, or null if unclear\n'
+            '  "location": where this happened, or "" if unclear\n'
+            '  "key_entities": a list of {"name": str, "role": str} for the '
+            "real people/figures/entities the sources mention — role is free "
+            "text describing their actual involvement (e.g. \"victim\", "
+            "\"accused\", \"deity\", \"witness\", \"investigating officer\" — "
+            "whatever fits this specific subject)\n"
+            '  "key_facts": a list of short factual strings drawn directly '
+            "from the sources\n"
+            '  "outcome": how this concluded/resolved (verdict, ending, '
+            'resolution — whatever "outcome" means for this subject), or "" '
+            "if the sources don't say\n\n"
+            f"RAW SOURCES:\n{sources_text}"
+        )
+
+        import google.generativeai as genai
+
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel("gemini-2.5-flash")
+
+        try:
+            response = model.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.2,
+                    # gemini-2.5-flash burns an uncontrolled amount of tokens
+                    # on internal "thinking" before any visible output —
+                    # learned the hard way this session that under ~1500 risks
+                    # silent truncation. This prompt + sources is meatier, so
+                    # give it real headroom.
+                    max_output_tokens=3000,
+                ),
+            )
+            text = (response.text or "").strip()
+        except Exception as exc:
+            logger.error("research synthesis Gemini call failed: {}", exc)
+            return {}
+
+        cleaned = re.sub(r"^```(?:json)?\s*", "", text)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+        try:
+            data = json.loads(cleaned)
+        except json.JSONDecodeError as exc:
+            logger.error("research synthesis returned non-JSON: {} | text={!r}", exc, text[:500])
+            return {}
+
+        if not isinstance(data, dict):
+            logger.error("research synthesis returned non-dict JSON: {!r}", data)
+            return {}
+
+        return data
 
     def _search_indian_kanoon(self, case_name: str, slug: str) -> list[dict]:
         logger.info("_search_indian_kanoon: case_name={!r}", case_name)

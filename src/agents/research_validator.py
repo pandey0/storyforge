@@ -31,7 +31,7 @@ def _structural_check(research: dict) -> tuple[bool, str]:
     has_summary_content = bool(
         isinstance(summary, dict)
         and (
-            (summary.get("victim") or "").strip()
+            (summary.get("subject") or "").strip()
             or summary.get("year")
             or (summary.get("location") or "").strip()
         )
@@ -69,9 +69,10 @@ def _llm_sanity_check(research: dict) -> tuple[bool, str]:
     model = genai.GenerativeModel("gemini-2.5-flash")
 
     prompt = (
-        "You are reviewing a JSON research file for a true-crime case documentary "
-        "pipeline. A human just hand-edited this file. Answer ONLY with the single "
-        "word YES if it still looks like coherent, plausible true-crime case research "
+        "You are reviewing a JSON research file for a documentary content "
+        "pipeline (the case may be on any subject — not necessarily crime). "
+        "A human just hand-edited this file. Answer ONLY with the single "
+        "word YES if it still looks like coherent, plausible case research "
         "(case name, summary, sources — normal prose/data, even if incomplete or "
         "terse), or NO if it looks corrupted, nonsensical, spam, or unrelated noise. "
         "After the YES/NO, optionally add a colon and a short reason.\n\n"

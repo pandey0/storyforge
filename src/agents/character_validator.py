@@ -4,7 +4,9 @@ Lightweight validation gate for the characters step (Phase 21C).
 Mirrors research_validator.py's shape: a single small Gemini call that
 sanity-checks the *current* character set (name/role/notes) against the
 case research, looking for roles that obviously don't fit (e.g. someone
-tagged "victim" who only appears in the research as a lawyer or witness).
+tagged with one role in the cast list who the research actually describes
+playing a different, unrelated role). Role taxonomy is whatever the case's
+ChannelProfile.entity_roles defines — not assumed to be crime-specific.
 
 This deliberately does NOT re-derive roles or touch the DB rows — it only
 asks "does this still look right" and records the verdict via the generic
@@ -52,14 +54,13 @@ def _llm_check(research: dict, characters: list[dict]) -> tuple[bool, str]:
     model = genai.GenerativeModel("gemini-2.5-flash")
 
     prompt = (
-        "You are reviewing the cast list extracted for a true-crime case "
-        "documentary pipeline. Given the case research context and a list of "
-        "characters with their assigned role and notes, check whether each "
-        "character's role still plausibly fits what the research says about "
-        "them (for example: someone tagged 'victim' should actually appear as "
-        "a victim in the research, not as a lawyer or police officer; someone "
-        "tagged 'accused' should not be described in the research purely as a "
-        "witness or journalist).\n\n"
+        "You are reviewing the cast list extracted for a documentary content "
+        "pipeline (the case may be on any subject, not necessarily crime). "
+        "Given the case research context and a list of characters with their "
+        "assigned role and notes, check whether each character's role still "
+        "plausibly fits what the research actually says about them — flag "
+        "anyone whose assigned role contradicts how the research describes "
+        "their involvement.\n\n"
         "Answer ONLY with the single word YES if every character's role "
         "plausibly fits, or NO if at least one role looks clearly wrong. "
         "After the YES/NO, optionally add a colon and a short reason naming "

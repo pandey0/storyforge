@@ -300,16 +300,17 @@ class CharacterAgent:
             role = self._normalize_role(role, entity_roles)
             chars[name] = {"role": role, "notes": desc[:200] if desc else "From research.json people_involved"}
 
-        # Fallback: summary fields (if people_involved was empty)
+        # Fallback: summary.key_entities (if people_involved was empty)
         if not chars:
             summary = research.get("summary", {})
             if isinstance(summary, dict):
-                victim = summary.get("victim")
-                if victim:
-                    chars[victim] = {"role": "victim", "notes": "Primary victim"}
-                perp = summary.get("perpetrator")
-                if perp:
-                    chars[perp] = {"role": "accused", "notes": "Primary accused"}
+                for entity in summary.get("key_entities", []):
+                    name = (entity.get("name") or "").strip()
+                    if not name:
+                        continue
+                    raw_role = entity.get("role", "")
+                    role = self._normalize_role(raw_role, entity_roles)
+                    chars[name] = {"role": role, "notes": f"From research key_entities ({raw_role})"}
 
         return chars
 
@@ -369,11 +370,12 @@ class CharacterAgent:
 
         # Strategy 2: First-name only — if a known surname appears in script,
         # also count standalone first-name occurrences already covered by bigram.
-        # Additionally, pull names directly from research victim/perpetrator fields.
+        # Additionally, pull names directly from research key_entities.
         summary = research.get("summary", {})
         if isinstance(summary, dict):
-            for field in ("victim", "perpetrator"):
-                val = summary.get(field, "")
+            for entity in summary.get("key_entities", []):
+                val = (entity.get("name") or "").strip()
+                role = self._normalize_role(entity.get("role", ""), entity_roles)
                 if val and val not in chars:
                     count = script.count(val)
                     if count == 0:
@@ -381,21 +383,18 @@ class CharacterAgent:
                         fname = val.split()[0] if " " in val else val
                         count = script.count(fname)
                         if count >= 2:
-                            role = "victim" if field == "victim" else "accused"
                             chars[val] = {"role": role, "notes": f"From research, first-name mentioned {count}x"}
                     elif count >= 1:
-                        role = "victim" if field == "victim" else "accused"
                         chars[val] = {"role": role, "notes": f"From research, mentioned {count}x"}
 
         return chars
 
     def _infer_role(self, name: str, script: str, research: dict, entity_roles: list[dict]) -> Optional[str]:
         summary = research.get("summary", {})
-        if isinstance(summary, dict):
-            if name == summary.get("victim"):
-                return "victim"
-            if name == summary.get("perpetrator"):
-                return "accused"
+        key_entities = summary.get("key_entities", []) if isinstance(summary, dict) else []
+        for entity in key_entities:
+            if name == entity.get("name"):
+                return self._normalize_role(entity.get("role", ""), entity_roles)
 
         # Collect all occurrences, check context around each
         role_scores: dict[str, int] = {}
@@ -422,16 +421,13 @@ class CharacterAgent:
         if role_scores:
             return max(role_scores, key=role_scores.get)
 
-        # Cross-check: if name contains/matches research victim or perpetrator fragments
-        victim = summary.get("victim", "") if isinstance(summary, dict) else ""
-        perp = summary.get("perpetrator", "") if isinstance(summary, dict) else ""
-        if victim:
-            victim_parts = victim.lower().split()
-            if any(p in name.lower() for p in victim_parts if len(p) > 2):
-                return "victim"
-        if perp:
-            perp_parts = perp.lower().split()
-            if any(p in name.lower() for p in perp_parts if len(p) > 2):
-                return "accused"
+        # Cross-check: if name contains/matches a key_entity name fragment
+        for entity in key_entities:
+            ent_name = (entity.get("name") or "").lower()
+            if not ent_name:
+                continue
+            ent_parts = ent_name.split()
+            if any(p in name.lower() for p in ent_parts if len(p) > 2):
+                return self._normalize_role(entity.get("role", ""), entity_roles)
 
         return None
