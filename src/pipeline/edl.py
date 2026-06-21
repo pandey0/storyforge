@@ -41,15 +41,27 @@ def save_edl(slug: str, edl: EDL) -> Path:
     return p
 
 
+def edl_checkpoint_step(track: str, topic: Optional[str] = None) -> str:
+    """Checkpoint step name for a given EDL — one lock-in gate PER EPISODE for
+    shorts, not one shared per case. A bug in the first cut of this gate keyed
+    every EDL (across every shorts episode in a case) off a single literal
+    "edl" checkpoint, so locking in episode 1's overrides silently activated
+    whatever was saved in every other episode's EDL too. Longform has only one
+    EDL per case, so "edl" alone is still correct there.
+    """
+    return "edl" if track == "longform" else f"edl_shorts_{topic}"
+
+
 def get_segment_override(edl: Optional[EDL], segment_id: str, slug: str) -> Optional[EDLSegment]:
     """Return the override for *segment_id*, or None if absent / source_type=='auto'.
 
-    Lock-in gate (Phase 21F): an override only takes effect once the case's
-    "edl" checkpoint is exactly status=="human_approved". Any saved-but-not-yet-
-    approved override (status "human_edited" or no checkpoint at all — e.g. a
-    case that has never touched the EDL editor) is ignored here and the caller
-    falls back to its normal auto-selection logic. *slug* is required to look
-    up the case id and check approval; pass the EDL's own case's slug.
+    Lock-in gate (Phase 21F): an override only takes effect once this EDL's own
+    checkpoint (see edl_checkpoint_step — per-episode for shorts) is exactly
+    status=="human_approved". Any saved-but-not-yet-approved override (status
+    "human_edited" or no checkpoint at all — e.g. a case that has never
+    touched the EDL editor) is ignored here and the caller falls back to its
+    normal auto-selection logic. *slug* is required to look up the case id and
+    check approval; pass the EDL's own case's slug.
     """
     if edl is None:
         return None
@@ -57,14 +69,15 @@ def get_segment_override(edl: Optional[EDL], segment_id: str, slug: str) -> Opti
     if seg is None or seg.source_type == "auto" or not seg.source_path:
         return None
 
-    if not _edl_is_approved(slug):
+    if not _edl_is_approved(slug, edl.track, edl.topic):
         return None
 
     return seg
 
 
-def _edl_is_approved(slug: str) -> bool:
-    """Look up the case by slug and check whether its 'edl' checkpoint is human_approved."""
+def _edl_is_approved(slug: str, track: str, topic: Optional[str] = None) -> bool:
+    """Look up the case by slug and check whether THIS EDL's checkpoint (see
+    edl_checkpoint_step) is human_approved."""
     from src.db.models import Case
     from src.db.session import get_session
     from src.pipeline.checkpoints import is_approved
@@ -75,7 +88,7 @@ def _edl_is_approved(slug: str) -> bool:
             return False
         case_id = str(case.id)
 
-    return is_approved(case_id, "edl")
+    return is_approved(case_id, edl_checkpoint_step(track, topic))
 
 
 def build_longform_skeleton(slug: str) -> EDL:

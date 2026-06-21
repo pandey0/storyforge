@@ -10,6 +10,7 @@ from src.pipeline.edl import (
     EDL,
     build_longform_skeleton,
     build_shorts_skeleton,
+    edl_checkpoint_step,
     load_edl,
     save_edl,
 )
@@ -53,9 +54,10 @@ async def put_edl(slug: str, edl: EDL):
     from src.pipeline.checkpoints import mark_human_edited
 
     path = save_edl(slug, edl)
+    step = edl_checkpoint_step(edl.track, edl.topic)
 
     def _mark():
-        mark_human_edited(_case_id(slug), "edl", notes="EDL override saved")
+        mark_human_edited(_case_id(slug), step, notes="EDL override saved")
 
     await asyncio.to_thread(_mark)
 

@@ -65,9 +65,13 @@ export function EditDecisionListEditor({
   topic?: string
 }) {
   const accent = ACCENT[track]
+  // One lock-in checkpoint PER EPISODE for shorts, not shared across the
+  // whole case — locking episode 1 must not silently activate episode 2's
+  // unrelated overrides. Mirrors src/pipeline/edl.py's edl_checkpoint_step.
+  const checkpointStep = track === 'longform' ? 'edl' : `edl_shorts_${topic}`
   const { files } = useCaseFiles(slug)
   const { characters } = useCharacters(slug)
-  const { checkpoint, mutate: mutateCheckpoint } = useCheckpoint(slug, 'edl')
+  const { checkpoint, mutate: mutateCheckpoint } = useCheckpoint(slug, checkpointStep)
   const [edl, setEdl] = useState<EDL | null>(null)
   const [loadedKey, setLoadedKey] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -207,7 +211,7 @@ export function EditDecisionListEditor({
     setLockingIn(true)
     setMsg(null)
     try {
-      await api.approveCheckpoint(slug, 'edl')
+      await api.approveCheckpoint(slug, checkpointStep)
       await mutateCheckpoint()
       setMsg({ text: 'Locked in — overrides are now active at render time.', ok: true })
     } catch (e) {

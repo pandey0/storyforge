@@ -31,7 +31,7 @@ from pathlib import Path
 from loguru import logger
 
 from src.pipeline.checkpoints import mark_ai_validated
-from src.pipeline.edl import EDLSegment, load_edl
+from src.pipeline.edl import EDLSegment, edl_checkpoint_step, load_edl
 
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 
@@ -44,10 +44,11 @@ def validate_edl(case_id: str, slug: str, track: str, topic: str | None = None) 
     the lock-in gate (mark_human_approved) is a fully separate, explicit
     human action regardless of this verdict.
     """
+    step = edl_checkpoint_step(track, topic)
     edl = load_edl(slug, track, topic)
     if edl is None:
         passed, notes = True, "no EDL saved yet — nothing to validate"
-        mark_ai_validated(case_id, "edl", passed, notes=notes)
+        mark_ai_validated(case_id, step, passed, notes=notes)
         return passed, notes
 
     reasons: list[str] = []
@@ -65,7 +66,7 @@ def validate_edl(case_id: str, slug: str, track: str, topic: str | None = None) 
     passed = not reasons
     notes = "; ".join(reasons)
 
-    mark_ai_validated(case_id, "edl", passed, notes=notes or None)
+    mark_ai_validated(case_id, step, passed, notes=notes or None)
     logger.info(
         "EDL validation [{}/{}{}]: passed={} notes={}",
         slug, track, f"/{topic}" if topic else "", passed, notes or "(none)",
