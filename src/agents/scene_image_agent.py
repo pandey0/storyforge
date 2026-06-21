@@ -1,27 +1,32 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
 from pathlib import Path
 from typing import Optional
 
-import requests
+import httpx
 from loguru import logger
 
 from src.db.models import Case, CaseCharacter
 from src.db.session import get_session
 
-# Cap controls DALL-E 3 spend per episode — ~$0.04/image at standard quality,
-# so 4 images keeps a single short well under $0.20 even if every segment matched.
+# Cap controls image-gen spend per episode. google/gemini-2.5-flash-image via
+# OpenRouter runs ~$0.0003/image (vs DALL-E 3's ~$0.04-0.08) — 4 images keeps
+# a single short under a cent.
 _MAX_IMAGES_PER_EPISODE = 4
 
 _SCENE_EXCERPT_CHARS = 120
 
+_OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+_OPENROUTER_MODEL = "google/gemini-2.5-flash-image"
+
 _PROMPT_SUFFIX = (
     "Realistic documentary-style scene illustration. Indian setting. "
     "Journalistic, respectful, non-sensational. Cinematic lighting. "
-    "No text, no logo, no watermark."
+    "Vertical 9:16 portrait orientation. No text, no logo, no watermark."
 )
 
 
@@ -34,7 +39,7 @@ class SceneImageAgent:
     def run(self, slug: str, topic_slug: str) -> list[dict]:
         self._warn_if_characters_unapproved(slug)
 
-        if not self._openai_available():
+        if not self._openrouter_available():
             return []
 
         md_path = Path(f"data/cases/{slug}/shorts/{topic_slug}.md")
@@ -103,14 +108,9 @@ class SceneImageAgent:
     # Availability check — graceful degradation, no partial work
     # ------------------------------------------------------------------
 
-    def _openai_available(self) -> bool:
-        if not os.environ.get("OPENAI_API_KEY"):
-            logger.warning("OPENAI_API_KEY not set — skipping scene image generation")
-            return False
-        try:
-            import openai  # noqa: F401
-        except ImportError:
-            logger.warning("openai package not installed — skipping scene image generation")
+    def _openrouter_available(self) -> bool:
+        if not os.environ.get("OPENROUTER_API_KEY"):
+            logger.warning("OPENROUTER_API_KEY not set — skipping scene image generation")
             return False
         return True
 
@@ -251,19 +251,28 @@ class SceneImageAgent:
         dest = out_dir / f"seg_{segment['index']:02d}.png"
 
         try:
-            from openai import OpenAI
-            client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-            response = client.images.generate(
-                model="dall-e-3",
-                prompt=prompt,
-                size="1024x1792",
-                quality="standard",
-                n=1,
+            resp = httpx.post(
+                _OPENROUTER_URL,
+                headers={
+                    "Authorization": f"Bearer {os.environ.get('OPENROUTER_API_KEY')}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": _OPENROUTER_MODEL,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "modalities": ["image", "text"],
+                },
+                timeout=60,
             )
-            img_url = response.data[0].url
-            img_resp = requests.get(img_url, timeout=60)
-            img_resp.raise_for_status()
-            dest.write_bytes(img_resp.content)
+            resp.raise_for_status()
+            data = resp.json()
+            images = data["choices"][0]["message"].get("images") or []
+            if not images:
+                logger.warning("OpenRouter returned no image for segment {}: {!r}", segment["index"], data)
+                return None
+            data_url = images[0]["image_url"]["url"]
+            b64_payload = data_url.split(",", 1)[1] if "," in data_url else data_url
+            dest.write_bytes(base64.b64decode(b64_payload))
             logger.info("Scene image saved: {}", dest)
             return {
                 "segment_index": segment["index"],
