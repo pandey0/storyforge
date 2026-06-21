@@ -261,3 +261,28 @@ class PipelineLog(Base):
         return f"<PipelineLog id={self.id} agent={self.agent!r} action={self.action!r} status={self.status!r}>"
 
 
+class StepCheckpoint(Base):
+    """
+    Generic human<->AI validation state for one (case, step) pair. Every
+    pipeline step plugs into this same table instead of inventing its own
+    override/validation/approval pattern — see docs/TRACKER.md Phase 21.
+
+    status: ai_generated | human_edited | ai_validated | ai_flagged |
+            human_approved | human_rejected
+    edited_by: who made the most recent change — "ai" | "human"
+    """
+    __tablename__ = "step_checkpoints"
+    __table_args__ = (UniqueConstraint("case_id", "step", name="uq_checkpoint_case_step"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    case_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("cases.id"), nullable=False)
+    step: Mapped[str] = mapped_column(String(50), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, server_default=text("'ai_generated'"))
+    edited_by: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    validation_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    def __repr__(self) -> str:
+        return f"<StepCheckpoint case_id={self.case_id} step={self.step!r} status={self.status!r}>"
+
+
