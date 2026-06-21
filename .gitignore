@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.env
+node_modules/
+.next/
+data/cases/*/
+data/raw_judgments/
+data/news/
+data/reports/
+*.mp3
+*.mp4
+*.wav
+*.jpg
+*.jpeg
+*.png
