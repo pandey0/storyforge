@@ -711,14 +711,15 @@ per the "browser UI, server renders" pattern real JSON-to-video products use).
       EDL or auto skeleton), `PUT /api/edl/{slug}` to save
 - [x] Wired into `src/api/main.py` router list, app boots clean
 
-### 19B. Longform consumption [ ]
-- [ ] `src/video/assembler.py` (`VideoCreator`) / `video_producer_agent.py` —
-      `_load_broll_map` / `_build_segments` check for a saved EDL first; for any
-      segment with a non-`auto` override, use `source_path` instead of the
-      automatic per-section Pexels pick. Segments with no override (or no EDL
-      file at all) fall through to current automatic behavior unchanged.
+### 19B. Longform consumption [x]
+- [x] `src/video/assembler.py` (`VideoCreator`) —  `_build_segments` loads the
+      saved EDL (`load_edl(state.slug, "longform")`) and checks
+      `get_segment_override(edl, str(idx), slug)` per timing-array index; a
+      non-`auto` override's `source_path` replaces the automatic per-section
+      Pexels pick (`broll_map.get(section)`). No override (or no EDL file at
+      all) falls through to current automatic behavior unchanged.
 
-### 19C. Shorts consumption [ ]
+### 19C. Shorts consumption [x]
 - [x] `shorts_assembler_agent.py`'s `_assemble_episode` — EDL override check
       applied to the per-segment scene-image manifest (scoping decision: whole-
       episode char_photo/broll fallback left untouched, no segment mapping for

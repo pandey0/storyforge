@@ -4,7 +4,7 @@ import threading
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from src.api.jobs import finish_job, get_all_jobs, get_job, is_running, start_job, update_job
@@ -743,6 +743,73 @@ async def run_thumbnail(slug: str):
     return {"job_id": job_id, "message": "Thumbnail generation started in background"}
 
 
+@router.put("/{slug}/thumbnail/replace")
+async def replace_thumbnail(slug: str, file: UploadFile = File(...)):
+    """Swap data/cases/{slug}/output/thumbnail.jpg for an operator-supplied
+    image — without re-running ThumbnailAgent (no DALL-E call, no Pillow
+    text-overlay compose). Mirrors ThumbnailAgent's exact output contract
+    (1280x720 JPEG, same DB field updated) so downstream consumers (publish
+    pipeline, frontend preview) see no difference from an AI-generated one.
+    """
+    import io
+
+    from PIL import Image, UnidentifiedImageError
+
+    from src.db.models import Case, Video
+    from src.db.session import get_session
+    from src.pipeline.checkpoints import mark_human_edited
+
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+    # Validate it's actually an image — verify() raises on truncated/garbage
+    # data. Must reopen after verify() since verify() leaves the file unusable
+    # for a subsequent load().
+    try:
+        Image.open(io.BytesIO(contents)).verify()
+        img = Image.open(io.BytesIO(contents))
+        img.load()
+    except (UnidentifiedImageError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=f"Uploaded file is not a valid image: {exc}")
+
+    # Match ThumbnailAgent's exact output contract: 1280x720 RGB JPEG, quality 95.
+    img = img.convert("RGB").resize((1280, 720), Image.LANCZOS)
+
+    with get_session() as session:
+        case = session.query(Case).filter(Case.slug == slug).first()
+        if case is None:
+            raise HTTPException(status_code=404, detail=f"Case '{slug}' not found")
+
+        out_dir = Path(f"data/cases/{slug}/output")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / "thumbnail.jpg"
+        img.save(str(out_path), format="JPEG", quality=95)
+
+        # Mirror ThumbnailAgent.run()'s DB side effects exactly: it sets
+        # Video.thumbnail_path on the latest Video row for this case.
+        video = (
+            session.query(Video)
+            .filter(Video.case_id == case.id)
+            .order_by(Video.created_at.desc())
+            .first()
+        )
+        if video is not None:
+            video.thumbnail_path = str(out_path)
+
+        case_id = str(case.id)
+
+    mark_human_edited(case_id, "thumbnail", notes="thumbnail manually replaced")
+    invalidate_slug(slug)
+
+    return {
+        "replaced": True,
+        "path": str(out_path),
+        "width": 1280,
+        "height": 720,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Approve / Reject
 # ---------------------------------------------------------------------------
@@ -836,6 +903,63 @@ async def reject_step(slug: str):
         raise HTTPException(status_code=400, detail=err)
     invalidate_slug(slug)
     return data
+
+
+# ---------------------------------------------------------------------------
+# Unpublish — LOCAL STATE ONLY. Never calls the YouTube Data API or any
+# src.agents.publish_agent code path. publish_agent.PublishAgent.run() is the
+# only place that sets case.status = "published" or talks to YouTube; this
+# route only ever reverses that one DB field so the dashboard stops treating
+# the case as terminal. If the video needs to come down on YouTube itself,
+# that must be done separately in YouTube Studio.
+# ---------------------------------------------------------------------------
+
+_UNPUBLISH_WARNING = (
+    "Unpublished via dashboard — LOCAL STATE ONLY, YouTube video status was NOT "
+    "changed. If the video needs to come down or be edited on YouTube itself, "
+    "do that separately in YouTube Studio."
+)
+
+
+@router.post("/{slug}/unpublish")
+async def unpublish_case(slug: str):
+    """Reset case.status from 'published' back to 'ready' (its immediate
+    predecessor in CaseState's CaseStatus literal — see src/pipeline/state.py).
+    Purely a dashboard-tracking rollback: does not touch YouTube in any way.
+    """
+    import asyncio
+
+    from src.db.models import Case
+    from src.db.session import get_session
+    from src.pipeline.checkpoints import mark_human_edited
+
+    def _do():
+        with get_session() as session:
+            case = session.query(Case).filter(Case.slug == slug).first()
+            if not case:
+                return None, f"Case '{slug}' not found"
+            if case.status != "published":
+                return None, f"Case is not published (status is '{case.status}') — nothing to unpublish"
+
+            case.status = "ready"
+            session.flush()
+            return str(case.id), None
+
+    case_id, err = await asyncio.to_thread(_do)
+    if err and "not found" in err:
+        raise HTTPException(status_code=404, detail=err)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+
+    mark_human_edited(case_id, "publish", notes=_UNPUBLISH_WARNING)
+    invalidate_slug(slug)
+
+    return {
+        "slug": slug,
+        "previous_status": "published",
+        "new_status": "ready",
+        "warning": _UNPUBLISH_WARNING,
+    }
 
 
 # ---------------------------------------------------------------------------

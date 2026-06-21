@@ -386,14 +386,7 @@ function StepOutputPreview({
   }
 
   if (step === 'thumbnail') {
-    const url = `${API_BASE}/files/cases/${slug}/output/thumbnail.jpg`
-    return (
-      <div>
-        <div className="text-xs text-[#555] mb-3">{sizeLine}</div>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={url} alt="thumbnail" className="rounded-lg" style={{ maxWidth: '400px' }} />
-      </div>
-    )
+    return <ThumbnailArtifact slug={slug} sizeLine={sizeLine} />
   }
 
   if (step === 'research') {
@@ -408,6 +401,70 @@ function StepOutputPreview({
   return (
     <div className="text-xs text-[#555]">
       Artifact exists · {sizeLine}
+    </div>
+  )
+}
+
+function ThumbnailArtifact({ slug, sizeLine }: { slug: string; sizeLine: string }) {
+  const [replacing, setReplacing] = useState(false)
+  const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null)
+  const [cacheBust, setCacheBust] = useState(0)
+  const fileInputRef = { current: null as HTMLInputElement | null }
+
+  const url = `${API_BASE}/files/cases/${slug}/output/thumbnail.jpg${cacheBust ? `?v=${cacheBust}` : ''}`
+
+  const handleReplace = async (file: File) => {
+    setReplacing(true)
+    setMsg(null)
+    try {
+      await api.replaceThumbnail(slug, file)
+      setCacheBust(Date.now())
+      mutate(`files:${slug}`)
+      setMsg({ text: 'Thumbnail replaced ✓', ok: true })
+    } catch (e) {
+      setMsg({ text: `Replace failed: ${e}`, ok: false })
+    } finally {
+      setReplacing(false)
+    }
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-xs text-[#555]">{sizeLine}</span>
+        <div className="flex items-center gap-1.5">
+          <input
+            ref={el => { fileInputRef.current = el }}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={e => {
+              const file = e.target.files?.[0]
+              if (file) handleReplace(file)
+              e.target.value = ''
+            }}
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={replacing}
+            className="text-[10px] px-2 py-1 rounded"
+            style={{
+              backgroundColor: replacing ? '#0d1a2e' : '#111',
+              color: replacing ? '#3b82f6' : '#888',
+              border: '1px solid #333',
+            }}
+          >
+            {replacing ? '⟳ Replacing…' : '↑ Replace thumbnail'}
+          </button>
+        </div>
+      </div>
+      {msg && (
+        <div className="mb-3 text-[10px]" style={{ color: msg.ok ? '#22c55e' : '#ef4444' }}>
+          {msg.text}
+        </div>
+      )}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={url} alt="thumbnail" className="rounded-lg" style={{ maxWidth: '400px' }} />
     </div>
   )
 }

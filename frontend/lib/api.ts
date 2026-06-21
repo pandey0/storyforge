@@ -152,6 +152,29 @@ export const api = {
   getJob: (slug: string): Promise<Job | null> =>
     apiFetch(`/api/pipeline/${slug}/job`).catch(() => null),
 
+  replaceThumbnail: (
+    slug: string,
+    file: File
+  ): Promise<{ replaced: boolean; path: string; width: number; height: number }> => {
+    const form = new FormData()
+    form.append('file', file)
+    return fetch(`${API}/api/pipeline/${slug}/thumbnail/replace`, {
+      method: 'PUT',
+      body: form,
+    }).then(async res => {
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(`${res.status} ${res.statusText} — ${JSON.stringify(body)}`)
+      }
+      return res.json()
+    })
+  },
+
+  unpublishCase: (
+    slug: string
+  ): Promise<{ slug: string; previous_status: string; new_status: string; warning: string }> =>
+    apiFetch(`/api/pipeline/${slug}/unpublish`, { method: 'POST' }),
+
   getScript: (slug: string) => apiFetch(`/api/scripts/${slug}`),
   saveScript: (
     slug: string,

@@ -90,6 +90,23 @@ export default function LongformCaseWorkspace({ params }: { params: Promise<{ sl
   const { files } = useCaseFiles(slug)
   const { job } = useJob(slug)
   const [stepRunning, setStepRunning] = useState<Record<string, boolean>>({})
+  const [unpublishing, setUnpublishing] = useState(false)
+
+  const unpublish = useCallback(async () => {
+    if (!window.confirm(
+      "This resets the dashboard's tracking only — it does NOT unpublish or hide the video on YouTube itself. Continue?"
+    )) return
+    setUnpublishing(true)
+    try {
+      const res = await api.unpublishCase(slug)
+      window.alert(res.warning)
+      mutate(`case:${slug}`)
+    } catch (e) {
+      window.alert(`Unpublish failed: ${e}`)
+    } finally {
+      setUnpublishing(false)
+    }
+  }, [slug])
 
   const runStep = useCallback(async (apiStep: string) => {
     setStepRunning(prev => ({ ...prev, [apiStep]: true }))
@@ -143,6 +160,15 @@ export default function LongformCaseWorkspace({ params }: { params: Promise<{ sl
             style={{ backgroundColor: `${statusColor(caseData.status)}22`, color: statusColor(caseData.status) }}>
             {caseData.status}
           </span>
+          {caseData.status === 'published' && (
+            <button
+              onClick={unpublish}
+              disabled={unpublishing}
+              className="text-[10px] px-2 py-1 rounded border border-[#333] text-[#888] hover:text-[#ef4444] hover:border-[#ef444444] transition-colors"
+            >
+              {unpublishing ? '⟳ Unpublishing...' : 'Unpublish (local only)'}
+            </button>
+          )}
         </div>
       </div>
       {(caseData.subject_name || caseData.location || caseData.year_of_crime) && (
