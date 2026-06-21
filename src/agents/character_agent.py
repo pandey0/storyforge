@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import re
 import uuid
@@ -14,6 +13,7 @@ from loguru import logger
 from src.db.channel_profile import get_profile_for_case
 from src.db.models import Case, CaseCharacter
 from src.db.session import get_session
+from src.pipeline.research_loader import load_research as _load_research_file
 from src.pipeline.state import CaseState
 
 # Latin proper names (English)
@@ -264,10 +264,10 @@ class CharacterAgent:
     # ------------------------------------------------------------------
 
     def _load_research(self, state: CaseState) -> dict:
-        path = Path(f"data/cases/{state.slug}/research.json")
-        if path.exists():
-            return json.loads(path.read_text(encoding="utf-8"))
-        return {}
+        try:
+            return _load_research_file(state.slug)
+        except ValueError:
+            return {}
 
     def _load_script(self, state: CaseState) -> str:
         for p in [

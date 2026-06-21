@@ -8,18 +8,10 @@ from pathlib import Path
 from loguru import logger
 
 from src.db.channel_profile import get_profile_for_case
+from src.pipeline.research_loader import load_research as _load_research
 from src.pipeline.state import CaseState
 
 _REQUIRED_CARD_FIELDS = ("slug", "label", "hook_text", "angle", "broll_query", "role_hint", "cta")
-
-
-def _load_research(slug: str) -> dict:
-    path = Path(f"data/cases/{slug}/research.json")
-    if not path.exists():
-        raise ValueError(
-            f"research.json not found for case '{slug}'. Expected path: {path.resolve()}"
-        )
-    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _extract_json_array(text: str) -> list[dict]:

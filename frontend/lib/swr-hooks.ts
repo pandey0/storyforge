@@ -1,5 +1,5 @@
 import useSWR from 'swr'
-import { api, Case, CaseProfile, Character, Job, StepConfig, CaseVersion } from './api'
+import { api, Case, CaseProfile, Character, Job, StepConfig, CaseVersion, Checkpoint, ResearchResponse } from './api'
 
 export function useCases() {
   const { data, error, isLoading, mutate } = useSWR(
@@ -26,6 +26,24 @@ export function useCaseProfile(slug: string) {
     { revalidateOnFocus: false }
   )
   return { profile: (data ?? null) as CaseProfile | null, error, isLoading }
+}
+
+export function useCheckpoint(slug: string, step: string) {
+  const { data, error, isLoading, mutate } = useSWR(
+    slug && step ? `checkpoint:${slug}:${step}` : null,
+    () => api.getCheckpoint(slug, step).catch(() => null),
+    { revalidateOnFocus: false }
+  )
+  return { checkpoint: (data ?? null) as Checkpoint | null, error, isLoading, mutate }
+}
+
+export function useResearch(slug: string) {
+  const { data, error, isLoading, mutate } = useSWR(
+    slug ? `research:${slug}` : null,
+    () => api.getResearch(slug).catch(() => null),
+    { revalidateOnFocus: false }
+  )
+  return { research: (data ?? null) as ResearchResponse | null, error, isLoading, mutate }
 }
 
 export interface EpisodeCard {

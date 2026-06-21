@@ -8,6 +8,7 @@ from loguru import logger
 
 from src.db.channel_profile import get_profile_for_case
 from src.db.models import ChannelProfile
+from src.pipeline.research_loader import load_research as _load_research_file
 from src.pipeline.state import CaseState
 
 # Minimum words of research content required to bother writing an episode at all.
@@ -19,23 +20,12 @@ def _count_words(text: str) -> int:
 
 
 def _load_research(slug: str) -> dict:
-    """Load and return the research.json for *slug*.
+    """Load and return the best available research (manual override > AI) for *slug*.
 
-    Raises ValueError with a clear message if the file is missing or invalid.
+    Raises ValueError with a clear message if neither file is present or valid.
     """
-    path = Path(f"data/cases/{slug}/research.json")
-    if not path.exists():
-        raise ValueError(
-            f"research.json not found for case '{slug}'. "
-            f"Expected path: {path.resolve()}"
-        )
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise ValueError(
-            f"research.json for case '{slug}' is not valid JSON: {exc}"
-        ) from exc
-    logger.info(f"Loaded research.json | case={slug} | keys={list(data.keys())}")
+    data = _load_research_file(slug)
+    logger.info(f"Loaded research | case={slug} | keys={list(data.keys())}")
     return data
 
 

@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import json
 import os
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Optional
 
 import pytz
@@ -11,6 +9,7 @@ from loguru import logger
 
 from src.db.models import Case, Video
 from src.db.session import get_session
+from src.pipeline.research_loader import load_research as _load_research_file
 from src.pipeline.state import CaseState
 
 IST = pytz.timezone("Asia/Kolkata")
@@ -18,25 +17,23 @@ IST = pytz.timezone("Asia/Kolkata")
 
 def build_description(case, state: CaseState) -> str:
     slug = case.slug
-    research_path = Path(f"data/cases/{slug}/research.json")
     sources_block = ""
-    if research_path.exists():
-        try:
-            data = json.loads(research_path.read_text(encoding="utf-8"))
-            sources_dict = data.get("sources", {})
-            source_urls: list[str] = []
-            if isinstance(sources_dict, dict):
-                for items in sources_dict.values():
-                    if isinstance(items, list):
-                        for item in items:
-                            url = item.get("url") or item.get("source_url") or item.get("link", "") if isinstance(item, dict) else ""
-                            if url:
-                                source_urls.append(url)
-            if source_urls:
-                urls = "\n".join(f"• {u}" for u in source_urls[:20])
-                sources_block = f"📚 स्रोत:\n{urls}\n"
-        except Exception:
-            pass
+    try:
+        data = _load_research_file(slug)
+        sources_dict = data.get("sources", {})
+        source_urls: list[str] = []
+        if isinstance(sources_dict, dict):
+            for items in sources_dict.values():
+                if isinstance(items, list):
+                    for item in items:
+                        url = item.get("url") or item.get("source_url") or item.get("link", "") if isinstance(item, dict) else ""
+                        if url:
+                            source_urls.append(url)
+        if source_urls:
+            urls = "\n".join(f"• {u}" for u in source_urls[:20])
+            sources_block = f"📚 स्रोत:\n{urls}\n"
+    except Exception:
+        pass
 
     location_str = case.location or "भारत"
     year_str = str(case.year_of_crime) if case.year_of_crime else "हाल के वर्षों में"

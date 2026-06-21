@@ -2,8 +2,8 @@
 import { use, useState, useCallback, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { api, ConfigField } from '@/lib/api'
-import { useStepConfig, useCaseFiles, useCaseVersions, useCase, useJob, useCharacters } from '@/lib/swr-hooks'
+import { api, ConfigField, CheckpointStatus } from '@/lib/api'
+import { useStepConfig, useCaseFiles, useCaseVersions, useCase, useJob, useCharacters, useCheckpoint, useResearch } from '@/lib/swr-hooks'
 import { LiveTerminal } from '@/components/LiveTerminal'
 import { SkeletonCard } from '@/components/Skeleton'
 import { ORDERED_PIPELINE, STEP_PREREQ, NEXT_STEP, STEP_LABEL, getStepIndex } from '@/lib/pipeline'
@@ -660,39 +660,221 @@ function CharactersArtifact({ slug }: { slug: string }) {
   )
 }
 
-function ResearchPreview({ slug, sizeLine }: { slug: string; sizeLine: string }) {
-  const [data, setData] = useState<Record<string, unknown> | null>(null)
-  const [loaded, setLoaded] = useState(false)
-  const API_BASE_INNER = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+const CHECKPOINT_BADGE: Record<string, { label: string; color: string; bg: string }> = {
+  ai_generated: { label: 'AI Generated', color: '#888', bg: '#111' },
+  human_edited: { label: 'Human Edited', color: '#3b82f6', bg: '#0a1422' },
+  ai_validated: { label: 'Validated', color: '#22c55e', bg: '#071a0d' },
+  ai_flagged: { label: 'Flagged', color: '#f59e0b', bg: '#1a1205' },
+  human_approved: { label: 'Approved', color: '#22c55e', bg: '#071a0d' },
+  human_rejected: { label: 'Rejected', color: '#ef4444', bg: '#1a0505' },
+}
 
-  if (!loaded) {
-    setLoaded(true)
-    fetch(`${API_BASE_INNER}/api/cases/${slug}/files/research`)
-      .then(r => r.ok ? r.json() : null)
-      .then(d => d && setData(d))
-      .catch(() => {})
+function CheckpointBadge({ status }: { status: CheckpointStatus }) {
+  if (!status) return null
+  const cfg = CHECKPOINT_BADGE[status]
+  if (!cfg) return null
+  return (
+    <span
+      className="text-[10px] px-2 py-0.5 rounded-full font-medium"
+      style={{ color: cfg.color, backgroundColor: cfg.bg, border: `1px solid ${cfg.color}33` }}
+    >
+      {cfg.label}
+    </span>
+  )
+}
+
+function ResearchPreview({ slug, sizeLine }: { slug: string; sizeLine: string }) {
+  const { research, isLoading, mutate: mutateResearch } = useResearch(slug)
+  const { checkpoint, mutate: mutateCheckpoint } = useCheckpoint(slug, 'research')
+
+  const [text, setText] = useState<string | null>(null)
+  const [initedFor, setInitedFor] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [validating, setValidating] = useState(false)
+  const [reverting, setReverting] = useState(false)
+  const [actioning, setActioning] = useState(false)
+  const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null)
+
+  // Initialize the textarea once per loaded research payload (re-init if source flips).
+  if (research && initedFor !== `${slug}:${research.source}`) {
+    setText(JSON.stringify(research.data, null, 2))
+    setInitedFor(`${slug}:${research.source}`)
   }
 
-  const summary = data?.summary as Record<string, unknown> | undefined
+  const showMsg = (text: string, ok: boolean) => {
+    setMsg({ text, ok })
+    setTimeout(() => setMsg(null), 5000)
+  }
+
+  const handleSave = async () => {
+    if (!text) return
+    let parsed: Record<string, unknown>
+    try {
+      parsed = JSON.parse(text)
+    } catch (e) {
+      showMsg(`Invalid JSON: ${e instanceof Error ? e.message : String(e)}`, false)
+      return
+    }
+    setSaving(true)
+    try {
+      await api.saveResearch(slug, parsed)
+      await mutateResearch()
+      await mutateCheckpoint()
+      showMsg('Saved as manual override. Running validation…', true)
+      setValidating(true)
+      try {
+        const result = await api.validateResearch(slug)
+        await mutateCheckpoint()
+        showMsg(result.passed ? 'Saved and validated.' : `Saved, but validation flagged it: ${result.notes}`, result.passed)
+      } finally {
+        setValidating(false)
+      }
+    } catch (e) {
+      showMsg(`Save failed: ${e instanceof Error ? e.message : String(e)}`, false)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleValidate = async () => {
+    setValidating(true)
+    try {
+      const result = await api.validateResearch(slug)
+      await mutateCheckpoint()
+      showMsg(result.passed ? 'Validation passed.' : `Validation flagged: ${result.notes}`, result.passed)
+    } catch (e) {
+      showMsg(`Validation failed: ${e instanceof Error ? e.message : String(e)}`, false)
+    } finally {
+      setValidating(false)
+    }
+  }
+
+  const handleRevert = async () => {
+    setReverting(true)
+    try {
+      await api.deleteResearchOverride(slug)
+      setInitedFor(null)
+      await mutateResearch()
+      await mutateCheckpoint()
+      showMsg('Reverted to AI-generated research.', true)
+    } catch (e) {
+      showMsg(`Revert failed: ${e instanceof Error ? e.message : String(e)}`, false)
+    } finally {
+      setReverting(false)
+    }
+  }
+
+  const handleApprove = async () => {
+    setActioning(true)
+    try {
+      await api.approveCheckpoint(slug, 'research')
+      await mutateCheckpoint()
+      showMsg('Approved.', true)
+    } catch (e) {
+      showMsg(`Approve failed: ${e instanceof Error ? e.message : String(e)}`, false)
+    } finally {
+      setActioning(false)
+    }
+  }
+
+  const handleReject = async () => {
+    setActioning(true)
+    try {
+      await api.rejectCheckpoint(slug, 'research')
+      await mutateCheckpoint()
+      showMsg('Rejected.', true)
+    } catch (e) {
+      showMsg(`Reject failed: ${e instanceof Error ? e.message : String(e)}`, false)
+    } finally {
+      setActioning(false)
+    }
+  }
+
+  const status = checkpoint?.status ?? null
+  const canApprove = status === 'ai_validated' || status === 'human_edited'
+  const hasManualOverride = research?.source === 'manual'
+  const busy = saving || validating || reverting || actioning
 
   return (
     <div>
-      <div className="text-xs text-[#555] mb-3">{sizeLine}</div>
-      {summary && (
-        <div className="bg-[#111] rounded-xl p-4 border border-[#222] mb-4">
-          <div className="text-xs font-medium text-[#e0e0e0] mb-3">Summary</div>
-          {Object.entries(summary).slice(0, 10).map(([k, v]) => (
-            <div key={k} className="flex gap-2 mb-1 text-xs">
-              <span className="text-[#555] w-28 flex-shrink-0 capitalize">{k.replace(/_/g, ' ')}:</span>
-              <span className="text-[#888]">{String(v)}</span>
-            </div>
-          ))}
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-xs text-[#555]">{sizeLine}{research ? ` · source: ${research.source}` : ''}</span>
+        <CheckpointBadge status={status} />
+      </div>
+
+      {msg && (
+        <div
+          className="text-xs py-2 px-3 rounded-lg mb-3"
+          style={{ backgroundColor: msg.ok ? '#071a0d' : '#1a0505', color: msg.ok ? '#22c55e' : '#ef4444' }}
+        >
+          {msg.text}
         </div>
       )}
-      {data && (
-        <pre className="text-[10px] text-[#444] font-mono overflow-auto rounded-lg bg-[#0a0a0a] p-3" style={{ maxHeight: '300px' }}>
-          {JSON.stringify(data, null, 2)}
-        </pre>
+
+      {!research && isLoading && (
+        <div className="text-xs text-[#555]">Loading research…</div>
+      )}
+
+      {text !== null && (
+        <textarea
+          value={text}
+          onChange={e => setText(e.target.value)}
+          className="w-full text-[11px] text-[#e0e0e0] font-mono whitespace-pre rounded-lg bg-[#0a0a0a] border border-[#222] p-3 focus:outline-none focus:border-[#3b82f6]"
+          style={{ minHeight: '320px', maxHeight: 'calc(100vh - 380px)', resize: 'vertical' }}
+          spellCheck={false}
+        />
+      )}
+
+      <div className="flex flex-wrap gap-2 mt-3">
+        <button
+          onClick={handleSave}
+          disabled={busy || text === null}
+          className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+          style={{ backgroundColor: '#071a0d', color: '#22c55e', border: '1px solid #22c55e33' }}
+        >
+          {saving ? '⟳ Saving…' : '✓ Save as manual override'}
+        </button>
+        <button
+          onClick={handleValidate}
+          disabled={busy}
+          className="px-3 py-1.5 rounded-lg text-xs transition-colors"
+          style={{ backgroundColor: '#111', color: '#888', border: '1px solid #333' }}
+        >
+          {validating ? '⟳ Validating…' : 'Run validation'}
+        </button>
+        {hasManualOverride && (
+          <button
+            onClick={handleRevert}
+            disabled={busy}
+            className="px-3 py-1.5 rounded-lg text-xs transition-colors"
+            style={{ backgroundColor: '#1a1205', color: '#f59e0b', border: '1px solid #f59e0b33' }}
+          >
+            {reverting ? '⟳ Reverting…' : '↩ Revert to AI version'}
+          </button>
+        )}
+        <div className="flex-1" />
+        {canApprove && (
+          <button
+            onClick={handleApprove}
+            disabled={busy}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+            style={{ backgroundColor: '#071a0d', color: '#22c55e', border: '1px solid #22c55e33' }}
+          >
+            Approve
+          </button>
+        )}
+        <button
+          onClick={handleReject}
+          disabled={busy}
+          className="px-3 py-1.5 rounded-lg text-xs transition-colors"
+          style={{ backgroundColor: '#1a0505', color: '#ef4444', border: '1px solid #ef444433' }}
+        >
+          Reject
+        </button>
+      </div>
+
+      {checkpoint?.validation_notes && (
+        <div className="text-[10px] text-[#555] mt-2">Notes: {checkpoint.validation_notes}</div>
       )}
     </div>
   )

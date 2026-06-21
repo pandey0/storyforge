@@ -16,12 +16,19 @@ VALID_STEPS = ["research", "script", "tts", "characters", "broll",
                "assemble", "thumbnail"]
 
 STEP_CONFIGS: dict[str, list[dict]] = {
-    "research": [
-        {"key": "extra_terms", "label": "Extra search terms", "type": "text", "placeholder": "jessica lall bar shooting"},
-        {"key": "year_from", "label": "Year from", "type": "number", "placeholder": "1999"},
-        {"key": "year_to", "label": "Year to", "type": "number", "placeholder": "2010"},
-        {"key": "force_urls", "label": "Force-include URLs (one per line)", "type": "textarea", "placeholder": "https://..."},
-    ],
+    # "research" intentionally has NO config schema. It previously listed
+    # extra_terms/year_from/year_to/force_urls fields here, but
+    # case_research_agent.py's run(self, slug) never read any saved config —
+    # it only takes slug, and IndianKanoonClient.search_case / NewsAPIClient
+    # .search_case only accept a case_name string (no date-range or URL-list
+    # params exist on either scraper, and NewsAPI's plan doesn't support
+    # arbitrary URL fetch-by-force). Wiring year_from/year_to/force_urls
+    # honestly would require real scraper rework, not a quick passthrough, so
+    # per CLAUDE.md's "no silent caps" rule we removed the dead UI fields
+    # instead of pretending to support them. Operators who need a manual
+    # override now use research_manual.json (see src/api/routes/research.py)
+    # instead of pre-search filters.
+    "research": [],
     "script": [
         {"key": "target_duration_min", "label": "Target duration (min)", "type": "number", "default": 35, "min": 20, "max": 50},
         {"key": "tone", "label": "Tone", "type": "select", "options": ["warm documentary", "journalistic", "investigative"], "default": "warm documentary"},

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 
@@ -10,6 +9,7 @@ from sqlalchemy.orm import Session
 from src.db.channel_profile import get_profile_for_case
 from src.db.models import Case, ChannelProfile, Script
 from src.db.session import get_session
+from src.pipeline.research_loader import load_research as _load_research_file
 from src.pipeline.state import CaseState
 
 
@@ -87,14 +87,10 @@ class ScriptWriterAgent:
             pass
 
     def _load_research(self, state: CaseState) -> dict:
-        if not state.research_path:
-            raise ValueError(f"state.research_path is None for case {state.slug}")
-        path = Path(state.research_path)
-        if not path.exists():
-            raise FileNotFoundError(f"research.json not found at {path}")
-        with path.open("r", encoding="utf-8") as fh:
-            data = json.load(fh)
-        return data
+        # Uses slug, not state.research_path — load_research() checks
+        # research_manual.json first so a human override always takes effect,
+        # regardless of which on-disk path case_research_agent recorded on state.
+        return _load_research_file(state.slug)
 
     def _build_prompt(self, research: dict, case, profile: ChannelProfile, fix_notes: str | None = None) -> str:
         subject_age = str(case.extra.get("subject_age", "अज्ञात"))

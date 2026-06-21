@@ -81,6 +81,28 @@ export interface CaseVersion {
   is_root: boolean
 }
 
+export type CheckpointStatus =
+  | 'ai_generated'
+  | 'human_edited'
+  | 'ai_validated'
+  | 'ai_flagged'
+  | 'human_approved'
+  | 'human_rejected'
+  | null
+
+export interface Checkpoint {
+  step: string
+  status: CheckpointStatus
+  edited_by: 'ai' | 'human' | null
+  validation_notes: string | null
+  updated_at: string | null
+}
+
+export interface ResearchResponse {
+  data: Record<string, unknown>
+  source: 'manual' | 'ai'
+}
+
 export interface EDLSegment {
   segment_id: string
   start: number
@@ -190,4 +212,20 @@ export const api = {
     apiFetch(`/api/edl/${slug}?track=${track}${topic ? `&topic=${topic}` : ''}`),
   saveEdl: (slug: string, edl: EDL) =>
     apiFetch(`/api/edl/${slug}`, { method: 'PUT', body: JSON.stringify(edl) }),
+
+  getResearch: (slug: string): Promise<ResearchResponse> =>
+    apiFetch(`/api/research/${slug}`),
+  saveResearch: (slug: string, data: Record<string, unknown>) =>
+    apiFetch(`/api/research/${slug}`, { method: 'PUT', body: JSON.stringify({ data }) }),
+  deleteResearchOverride: (slug: string) =>
+    apiFetch(`/api/research/${slug}`, { method: 'DELETE' }),
+  validateResearch: (slug: string): Promise<{ passed: boolean; notes: string }> =>
+    apiFetch(`/api/research/${slug}/validate`, { method: 'POST' }),
+
+  getCheckpoint: (slug: string, step: string): Promise<Checkpoint> =>
+    apiFetch(`/api/checkpoints/${slug}/${step}`),
+  approveCheckpoint: (slug: string, step: string) =>
+    apiFetch(`/api/checkpoints/${slug}/${step}/approve`, { method: 'POST' }),
+  rejectCheckpoint: (slug: string, step: string, notes?: string) =>
+    apiFetch(`/api/checkpoints/${slug}/${step}/reject`, { method: 'POST', body: JSON.stringify({ notes: notes ?? '' }) }),
 }

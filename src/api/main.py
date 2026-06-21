@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from src.api.routes import audio, cases, characters, checkpoints, edl, logs, pipeline, profiles, scripts, steps
+from src.api.routes import audio, cases, characters, checkpoints, edl, logs, pipeline, profiles, research, scripts, steps
 from src.api.routes import agent as agent_router
 
 
@@ -68,6 +68,7 @@ app.include_router(audio.router, prefix="/api")
 app.include_router(edl.router, prefix="/api")
 app.include_router(profiles.router, prefix="/api")
 app.include_router(checkpoints.router, prefix="/api")
+app.include_router(research.router, prefix="/api")
 
 
 # ---------------------------------------------------------------------------
