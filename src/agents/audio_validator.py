@@ -61,12 +61,14 @@ def validate_audio(
     """
     Run deterministic checks on the generated voiceover and record the
     result via mark_ai_validated against the matching checkpoint step
-    ("tts" for longform, "shorts_tts" for shorts).
+    ("tts" for longform; "shorts_tts_{topic}" for shorts — one checkpoint PER
+    EPISODE, not shared across every episode in the case, same fix as EDL's
+    edl_checkpoint_step).
 
     Returns (passed, notes) — notes is a comma-joined list of failure
     reasons, or "" if all checks passed.
     """
-    step = "tts" if track == "longform" else "shorts_tts"
+    step = "tts" if track == "longform" else f"shorts_tts_{topic}"
 
     try:
         mp3_path = _resolve_mp3_path(slug, track, topic)

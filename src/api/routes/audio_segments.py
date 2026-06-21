@@ -118,7 +118,7 @@ async def replace_audio_segment(
     if not contents:
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
-    step = "tts" if track == "longform" else "shorts_tts"
+    step = "tts" if track == "longform" else f"shorts_tts_{topic}"
 
     tmp_dir = Path(tempfile.mkdtemp(prefix="audio_segment_replace_"))
     try:

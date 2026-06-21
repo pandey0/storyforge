@@ -52,7 +52,9 @@ export function AudioSegmentList({
   /** Required when track === 'shorts' — e.g. "ep01_who_was_the_victim.mp3" (used to derive the _timings.json filename). */
   timingsFilename?: string
 }) {
-  const step = track === 'longform' ? 'tts' : 'shorts_tts'
+  // One checkpoint PER EPISODE for shorts, not shared across the whole case
+  // — mirrors src/agents/audio_validator.py's step naming exactly.
+  const step = track === 'longform' ? 'tts' : `shorts_tts_${topic}`
   const tFilename = timingsFilename ? timingsFilename.replace(/\.mp3$/, '_timings.json') : undefined
   const { timings, isLoading, mutate: mutateTimings } = useWordTimings(slug, track, tFilename)
   const { checkpoint, mutate: mutateCheckpoint } = useCheckpoint(slug, step)
