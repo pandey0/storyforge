@@ -32,6 +32,8 @@ class SceneImageAgent:
     """
 
     def run(self, slug: str, topic_slug: str) -> list[dict]:
+        self._warn_if_characters_unapproved(slug)
+
         if not self._openai_available():
             return []
 
@@ -71,6 +73,31 @@ class SceneImageAgent:
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
         logger.info("SceneImageAgent: {} images written for {}/{}", len(manifest), slug, topic_slug)
         return manifest
+
+    # ------------------------------------------------------------------
+    # Advisory checkpoint gate (Phase 21C) — warns only, never blocks.
+    # ------------------------------------------------------------------
+
+    def _warn_if_characters_unapproved(self, slug: str) -> None:
+        from src.pipeline.checkpoints import get_checkpoint
+
+        try:
+            with get_session() as session:
+                case = session.query(Case).filter_by(slug=slug).first()
+                case_id = str(case.id) if case else None
+        except Exception as exc:
+            logger.warning("Could not look up case for checkpoint check ({}): {}", slug, exc)
+            return
+
+        if not case_id:
+            return
+
+        checkpoint = get_checkpoint(case_id, "characters")
+        if not checkpoint or checkpoint.get("status") != "human_approved":
+            logger.warning(
+                "Using unapproved character set for {} — consider reviewing /cases/{}/ characters tab",
+                slug, slug,
+            )
 
     # ------------------------------------------------------------------
     # Availability check — graceful degradation, no partial work

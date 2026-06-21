@@ -2,14 +2,14 @@
 import { use, useState, useCallback } from 'react'
 import Link from 'next/link'
 import { api } from '@/lib/api'
-import { useCase, useJob, useCaseFiles, useScript, useCharacters } from '@/lib/swr-hooks'
+import { useCase, useJob, useCaseFiles, useScript, useCharacters, useCheckpoint } from '@/lib/swr-hooks'
 import { PipelineStepper } from '@/components/PipelineStepper'
 import { LiveTerminal } from '@/components/LiveTerminal'
 import { FileStatusGrid } from '@/components/FileStatusGrid'
 import { statusColor, getStepIndex, ORDERED_PIPELINE, PIPELINE_STEPS } from '@/lib/pipeline'
 import { SkeletonCard } from '@/components/Skeleton'
 import { mutate } from 'swr'
-import { Character } from '@/lib/api'
+import { Character, CheckpointStatus } from '@/lib/api'
 
 const TABS = ['Pipeline', 'Script', 'Characters', 'Audio', 'Video', 'Data', 'Logs'] as const
 type Tab = typeof TABS[number]
@@ -496,9 +496,33 @@ function ScriptTab({ slug }: { slug: string }) {
   )
 }
 
+const CHECKPOINT_BADGE: Record<string, { label: string; color: string; bg: string }> = {
+  ai_generated: { label: 'AI Generated', color: '#888', bg: '#111' },
+  human_edited: { label: 'Human Edited', color: '#3b82f6', bg: '#0a1422' },
+  ai_validated: { label: 'Validated', color: '#22c55e', bg: '#071a0d' },
+  ai_flagged: { label: 'Flagged', color: '#f59e0b', bg: '#1a1205' },
+  human_approved: { label: 'Approved', color: '#22c55e', bg: '#071a0d' },
+  human_rejected: { label: 'Rejected', color: '#ef4444', bg: '#1a0505' },
+}
+
+function CheckpointBadge({ status }: { status: CheckpointStatus }) {
+  if (!status) return null
+  const cfg = CHECKPOINT_BADGE[status]
+  if (!cfg) return null
+  return (
+    <span
+      className="text-[10px] px-2 py-0.5 rounded-full font-medium"
+      style={{ color: cfg.color, backgroundColor: cfg.bg, border: `1px solid ${cfg.color}33` }}
+    >
+      {cfg.label}
+    </span>
+  )
+}
+
 // ---- Characters Tab ----
 function CharactersTab({ slug }: { slug: string }) {
   const { characters, isLoading, mutate: mutateChars } = useCharacters(slug)
+  const { checkpoint, mutate: mutateCheckpoint } = useCheckpoint(slug, 'characters')
   const [adding, setAdding] = useState(false)
   const [newChar, setNewChar] = useState({ name: '', role: '', notes: '' })
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -506,6 +530,9 @@ function CharactersTab({ slug }: { slug: string }) {
   const [autoFinding, setAutoFinding] = useState(false)
   const [autoResult, setAutoResult] = useState<string | null>(null)
   const [autoFindingId, setAutoFindingId] = useState<string | null>(null)
+  const [validating, setValidating] = useState(false)
+  const [checkpointActioning, setCheckpointActioning] = useState(false)
+  const [checkpointMsg, setCheckpointMsg] = useState<{ text: string; ok: boolean } | null>(null)
 
   const ROLE_COLORS: Record<string, string> = {
     victim: '#22c55e',
@@ -523,6 +550,7 @@ function CharactersTab({ slug }: { slug: string }) {
     setNewChar({ name: '', role: '', notes: '' })
     setAdding(false)
     mutateChars()
+    mutateCheckpoint()
   }
 
   const addImage = async (id: string) => {
@@ -567,6 +595,53 @@ function CharactersTab({ slug }: { slug: string }) {
     }
   }
 
+  const showCheckpointMsg = (text: string, ok: boolean) => {
+    setCheckpointMsg({ text, ok })
+    setTimeout(() => setCheckpointMsg(null), 5000)
+  }
+
+  const handleValidateChars = async () => {
+    setValidating(true)
+    try {
+      const result = await api.validateCharacters(slug)
+      await mutateCheckpoint()
+      showCheckpointMsg(result.passed ? 'Validation passed.' : `Validation flagged: ${result.notes}`, result.passed)
+    } catch (e) {
+      showCheckpointMsg(`Validation failed: ${e instanceof Error ? e.message : String(e)}`, false)
+    } finally {
+      setValidating(false)
+    }
+  }
+
+  const handleApproveChars = async () => {
+    setCheckpointActioning(true)
+    try {
+      await api.approveCheckpoint(slug, 'characters')
+      await mutateCheckpoint()
+      showCheckpointMsg('Approved.', true)
+    } catch (e) {
+      showCheckpointMsg(`Approve failed: ${e instanceof Error ? e.message : String(e)}`, false)
+    } finally {
+      setCheckpointActioning(false)
+    }
+  }
+
+  const handleRejectChars = async () => {
+    setCheckpointActioning(true)
+    try {
+      await api.rejectCheckpoint(slug, 'characters')
+      await mutateCheckpoint()
+      showCheckpointMsg('Rejected.', true)
+    } catch (e) {
+      showCheckpointMsg(`Reject failed: ${e instanceof Error ? e.message : String(e)}`, false)
+    } finally {
+      setCheckpointActioning(false)
+    }
+  }
+
+  const checkpointStatus = checkpoint?.status ?? null
+  const checkpointBusy = validating || checkpointActioning
+
   if (isLoading) return (
     <div className="grid grid-cols-3 gap-3">
       {[...Array(6)].map((_, i) => <SkeletonCard key={i} className="h-40" />)}
@@ -576,7 +651,10 @@ function CharactersTab({ slug }: { slug: string }) {
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <span className="text-sm text-[#888]">{characters.length} characters</span>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-[#888]">{characters.length} characters</span>
+          <CheckpointBadge status={checkpointStatus} />
+        </div>
         <div className="flex gap-2">
           {characters.length > 0 && (
             <button onClick={autoFindAll} disabled={autoFinding}
@@ -591,6 +669,39 @@ function CharactersTab({ slug }: { slug: string }) {
           </button>
         </div>
       </div>
+
+      {characters.length > 0 && (
+        <div className="flex items-center gap-2 mb-4">
+          <button onClick={handleValidateChars} disabled={checkpointBusy}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+            style={{ backgroundColor: '#111', color: '#888', border: '1px solid #333' }}>
+            {validating ? '⟳ Validating…' : 'Validate characters'}
+          </button>
+          <button onClick={handleApproveChars} disabled={checkpointBusy}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+            style={{ backgroundColor: '#071a0d', color: '#22c55e', border: '1px solid #22c55e33' }}>
+            Approve
+          </button>
+          <button onClick={handleRejectChars} disabled={checkpointBusy}
+            className="px-3 py-1.5 rounded-lg text-xs transition-colors"
+            style={{ backgroundColor: '#1a0505', color: '#ef4444', border: '1px solid #ef444433' }}>
+            Reject
+          </button>
+        </div>
+      )}
+
+      {checkpointMsg && (
+        <div
+          className="text-xs py-2 px-3 rounded-lg mb-3"
+          style={{ backgroundColor: checkpointMsg.ok ? '#071a0d' : '#1a0505', color: checkpointMsg.ok ? '#22c55e' : '#ef4444' }}
+        >
+          {checkpointMsg.text}
+        </div>
+      )}
+
+      {checkpoint?.validation_notes && (
+        <div className="text-[10px] text-[#555] mb-3">Notes: {checkpoint.validation_notes}</div>
+      )}
 
       {autoResult && (
         <div className="mb-3 px-3 py-2 rounded-lg text-[11px]"

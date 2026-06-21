@@ -175,6 +175,8 @@ export const api = {
     apiFetch(`/api/characters/${slug}/${id}/auto-image`, { method: 'POST' }),
   autoImageAll: (slug: string) =>
     apiFetch(`/api/characters/${slug}/auto-image-all`, { method: 'POST' }),
+  validateCharacters: (slug: string): Promise<{ passed: boolean; notes: string }> =>
+    apiFetch(`/api/characters/${slug}/validate`, { method: 'POST' }),
 
   sendAgentMessage: (
     message: string,

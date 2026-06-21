@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from src.db.models import Case, CaseCharacter
 from src.db.session import get_session
+from src.pipeline.checkpoints import mark_human_edited
 
 router = APIRouter(prefix="/characters", tags=["characters"])
 
@@ -111,13 +112,16 @@ async def create_character(slug: str, body: CharacterCreate):
             )
             session.add(row)
             session.flush()
-            return _char_to_dict(row), None
+            return (_char_to_dict(row), str(case.id)), None
 
-    data, err = await asyncio.to_thread(_create)
+    result, err = await asyncio.to_thread(_create)
     if err == "not_found":
         raise HTTPException(status_code=404, detail=f"Case '{slug}' not found")
     if err == "conflict":
         raise HTTPException(status_code=409, detail=f"Character '{body.name}' already exists for '{slug}'")
+    data, case_id = result
+    # Manual additions are human edits to the character set, not AI generation.
+    mark_human_edited(case_id, "characters", notes=f"added {data['name']}")
     return data
 
 
@@ -145,15 +149,17 @@ async def update_character(slug: str, char_id: str, body: CharacterUpdate):
             if body.notes is not None:
                 row.notes = body.notes
             session.flush()
-            return _char_to_dict(row), None
+            return (_char_to_dict(row), str(case.id)), None
 
-    data, err = await asyncio.to_thread(_update)
+    result, err = await asyncio.to_thread(_update)
     if err == "case_not_found":
         raise HTTPException(status_code=404, detail=f"Case '{slug}' not found")
     if err == "invalid_id":
         raise HTTPException(status_code=422, detail="Invalid character ID format")
     if err == "not_found":
         raise HTTPException(status_code=404, detail=f"Character '{char_id}' not found")
+    data, case_id = result
+    mark_human_edited(case_id, "characters", notes=f"edited {data['name']}")
     return data
 
 
@@ -603,3 +609,27 @@ async def auto_image_all(slug: str):
     if err == "case_not_found":
         raise HTTPException(404, f"Case '{slug}' not found")
     return data
+
+
+# ---------------------------------------------------------------------------
+# Validation (Phase 21C)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{slug}/validate")
+async def validate(slug: str):
+    """Run the LLM character-role sanity check and record the result as an
+    ai_validated/ai_flagged checkpoint for the 'characters' step."""
+    def _lookup_case_id():
+        with get_session() as session:
+            case = session.query(Case).filter(Case.slug == slug).first()
+            return str(case.id) if case else None
+
+    case_id = await asyncio.to_thread(_lookup_case_id)
+    if not case_id:
+        raise HTTPException(status_code=404, detail=f"Case '{slug}' not found")
+
+    from src.agents.character_validator import validate_characters
+
+    passed, notes = await asyncio.to_thread(validate_characters, case_id, slug)
+    return {"passed": passed, "notes": notes}

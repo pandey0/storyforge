@@ -662,6 +662,33 @@ class ShortsAssemblerAgent:
         _run(cmd)
 
     # ------------------------------------------------------------------
+    # Advisory checkpoint gate (Phase 21C) — warns only, never blocks.
+    # ------------------------------------------------------------------
+
+    def _warn_if_characters_unapproved(self, slug: str) -> None:
+        from src.db.models import Case
+        from src.db.session import get_session
+        from src.pipeline.checkpoints import get_checkpoint
+
+        try:
+            with get_session() as session:
+                case = session.query(Case).filter_by(slug=slug).first()
+                case_id = str(case.id) if case else None
+        except Exception as exc:
+            logger.warning("Could not look up case for checkpoint check ({}): {}", slug, exc)
+            return
+
+        if not case_id:
+            return
+
+        checkpoint = get_checkpoint(case_id, "characters")
+        if not checkpoint or checkpoint.get("status") != "human_approved":
+            logger.warning(
+                "Using unapproved character set for {} — consider reviewing /cases/{}/ characters tab",
+                slug, slug,
+            )
+
+    # ------------------------------------------------------------------
     # Character photo lookup (people-focused episodes)
     # ------------------------------------------------------------------
 
@@ -676,6 +703,8 @@ class ShortsAssemblerAgent:
         Falls back to any image in characters_dir if no role match.
         Returns None if characters_dir doesn't exist or has no images.
         """
+        self._warn_if_characters_unapproved(slug)
+
         card = _load_plan_card(slug, section_slug)
         has_role_hint = card is not None and card.get("role_hint")
         if not has_role_hint and section_slug not in _TOPIC_ROLE_MAP:
