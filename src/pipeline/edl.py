@@ -41,14 +41,41 @@ def save_edl(slug: str, edl: EDL) -> Path:
     return p
 
 
-def get_segment_override(edl: Optional[EDL], segment_id: str) -> Optional[EDLSegment]:
-    """Return the override for *segment_id*, or None if absent / source_type=='auto'."""
+def get_segment_override(edl: Optional[EDL], segment_id: str, slug: str) -> Optional[EDLSegment]:
+    """Return the override for *segment_id*, or None if absent / source_type=='auto'.
+
+    Lock-in gate (Phase 21F): an override only takes effect once the case's
+    "edl" checkpoint is exactly status=="human_approved". Any saved-but-not-yet-
+    approved override (status "human_edited" or no checkpoint at all — e.g. a
+    case that has never touched the EDL editor) is ignored here and the caller
+    falls back to its normal auto-selection logic. *slug* is required to look
+    up the case id and check approval; pass the EDL's own case's slug.
+    """
     if edl is None:
         return None
     seg = next((s for s in edl.segments if s.segment_id == segment_id), None)
     if seg is None or seg.source_type == "auto" or not seg.source_path:
         return None
+
+    if not _edl_is_approved(slug):
+        return None
+
     return seg
+
+
+def _edl_is_approved(slug: str) -> bool:
+    """Look up the case by slug and check whether its 'edl' checkpoint is human_approved."""
+    from src.db.models import Case
+    from src.db.session import get_session
+    from src.pipeline.checkpoints import is_approved
+
+    with get_session() as session:
+        case = session.query(Case).filter_by(slug=slug).first()
+        if case is None:
+            return False
+        case_id = str(case.id)
+
+    return is_approved(case_id, "edl")
 
 
 def build_longform_skeleton(slug: str) -> EDL:

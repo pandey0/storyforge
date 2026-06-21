@@ -222,6 +222,29 @@ export const api = {
     apiFetch(`/api/edl/${slug}?track=${track}${topic ? `&topic=${topic}` : ''}`),
   saveEdl: (slug: string, edl: EDL) =>
     apiFetch(`/api/edl/${slug}`, { method: 'PUT', body: JSON.stringify(edl) }),
+  uploadEdlAsset: (
+    slug: string,
+    track: 'longform' | 'shorts',
+    topic: string | undefined,
+    segmentKind: 'broll' | 'scene_image',
+    file: File
+  ): Promise<{ source_path: string }> => {
+    const form = new FormData()
+    form.append('file', file)
+    const qs = new URLSearchParams({ track, segment_kind: segmentKind, ...(topic ? { topic } : {}) })
+    return fetch(`${API}/api/edl/${slug}/upload?${qs.toString()}`, {
+      method: 'POST',
+      body: form,
+    }).then(async res => {
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(`${res.status} ${res.statusText} — ${JSON.stringify(body)}`)
+      }
+      return res.json()
+    })
+  },
+  validateEdl: (slug: string, track: 'longform' | 'shorts', topic?: string): Promise<{ passed: boolean; notes: string }> =>
+    apiFetch(`/api/edl/${slug}/validate?track=${track}${topic ? `&topic=${topic}` : ''}`, { method: 'POST' }),
 
   getResearch: (slug: string): Promise<ResearchResponse> =>
     apiFetch(`/api/research/${slug}`),

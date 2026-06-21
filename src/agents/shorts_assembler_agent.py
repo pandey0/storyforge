@@ -592,7 +592,7 @@ class ShortsAssemblerAgent:
         overridden: list[dict] = []
         for entry in manifest:
             segment_id = str(entry.get("segment_index"))
-            override = get_segment_override(edl, segment_id)
+            override = get_segment_override(edl, segment_id, slug)
             if override is None:
                 overridden.append(entry)
                 continue

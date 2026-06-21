@@ -3,12 +3,35 @@ import { useEffect, useMemo, useState } from 'react'
 import { Timeline } from '@xzdarcy/react-timeline-editor'
 import type { TimelineRow, TimelineAction } from '@xzdarcy/timeline-engine'
 import '@xzdarcy/react-timeline-editor/dist/react-timeline-editor.css'
-import { api, EDL, EDLSegment } from '@/lib/api'
-import { useCaseFiles, useCharacters } from '@/lib/swr-hooks'
+import { api, CheckpointStatus, EDL, EDLSegment } from '@/lib/api'
+import { useCaseFiles, useCharacters, useCheckpoint } from '@/lib/swr-hooks'
 
 const ACCENT: Record<'longform' | 'shorts', string> = {
   longform: '#3b82f6',
   shorts: '#22c55e',
+}
+
+const CHECKPOINT_BADGE: Record<string, { label: string; color: string; bg: string }> = {
+  ai_generated: { label: 'AI Generated', color: '#888', bg: '#111' },
+  human_edited: { label: 'Saved (not yet active)', color: '#3b82f6', bg: '#0a1422' },
+  ai_validated: { label: 'Validated', color: '#22c55e', bg: '#071a0d' },
+  ai_flagged: { label: 'Flagged', color: '#f59e0b', bg: '#1a1205' },
+  human_approved: { label: 'Locked In ✓', color: '#22c55e', bg: '#071a0d' },
+  human_rejected: { label: 'Rejected', color: '#ef4444', bg: '#1a0505' },
+}
+
+function CheckpointBadge({ status }: { status: CheckpointStatus }) {
+  if (!status) return null
+  const cfg = CHECKPOINT_BADGE[status]
+  if (!cfg) return null
+  return (
+    <span
+      className="text-[10px] px-2 py-0.5 rounded-full font-medium"
+      style={{ color: cfg.color, backgroundColor: cfg.bg, border: `1px solid ${cfg.color}33` }}
+    >
+      {cfg.label}
+    </span>
+  )
 }
 
 function formatTime(sec: number): string {
@@ -44,10 +67,15 @@ export function EditDecisionListEditor({
   const accent = ACCENT[track]
   const { files } = useCaseFiles(slug)
   const { characters } = useCharacters(slug)
+  const { checkpoint, mutate: mutateCheckpoint } = useCheckpoint(slug, 'edl')
   const [edl, setEdl] = useState<EDL | null>(null)
   const [loadedKey, setLoadedKey] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null)
+  const [uploadingId, setUploadingId] = useState<string | null>(null)
+  const [validating, setValidating] = useState(false)
+  const [validation, setValidation] = useState<{ passed: boolean; notes: string } | null>(null)
+  const [lockingIn, setLockingIn] = useState(false)
 
   const requestKey = `${slug}:${track}:${topic ?? ''}`
   const loading = loadedKey !== requestKey
@@ -139,11 +167,53 @@ export function EditDecisionListEditor({
     setMsg(null)
     try {
       await api.saveEdl(slug, edl)
-      setMsg({ text: 'Overrides saved.', ok: true })
+      await mutateCheckpoint()
+      setMsg({ text: 'Overrides saved — not yet active. Lock in to apply at render time.', ok: true })
     } catch (e) {
       setMsg({ text: String(e), ok: false })
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function handleUpload(seg: EDLSegment, segmentKind: 'broll' | 'scene_image', file: File) {
+    setUploadingId(seg.segment_id)
+    setMsg(null)
+    try {
+      const { source_path } = await api.uploadEdlAsset(slug, track, topic, segmentKind, file)
+      updateSegment(seg.segment_id, segmentKind, source_path)
+      setMsg({ text: 'Uploaded. Remember to Save Overrides, then Lock In.', ok: true })
+    } catch (e) {
+      setMsg({ text: String(e), ok: false })
+    } finally {
+      setUploadingId(null)
+    }
+  }
+
+  async function handleValidate() {
+    setValidating(true)
+    setValidation(null)
+    try {
+      const result = await api.validateEdl(slug, track, topic)
+      setValidation(result)
+    } catch (e) {
+      setValidation({ passed: false, notes: String(e) })
+    } finally {
+      setValidating(false)
+    }
+  }
+
+  async function handleLockIn() {
+    setLockingIn(true)
+    setMsg(null)
+    try {
+      await api.approveCheckpoint(slug, 'edl')
+      await mutateCheckpoint()
+      setMsg({ text: 'Locked in — overrides are now active at render time.', ok: true })
+    } catch (e) {
+      setMsg({ text: String(e), ok: false })
+    } finally {
+      setLockingIn(false)
     }
   }
 
@@ -157,6 +227,11 @@ export function EditDecisionListEditor({
 
   return (
     <div>
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-xs text-[#888]">Manual overrides</span>
+        <CheckpointBadge status={checkpoint?.status ?? null} />
+      </div>
+
       {timelineData[0]?.actions.length > 0 && (
         <div className="mb-4 rounded-lg overflow-hidden border border-[#1e1e1e]" style={{ background: '#0a0a0a' }}>
           <Timeline
@@ -214,6 +289,25 @@ export function EditDecisionListEditor({
                 <option key={c.id} value={`character::${c.id}`}>Character photo: {c.name}</option>
               ))}
             </select>
+            <label
+              className="text-[10px] px-2 py-1 rounded-md flex-shrink-0 transition-colors cursor-pointer"
+              style={{ border: '1px solid #2a2a2a', color: uploadingId === seg.segment_id ? '#333' : '#888' }}
+            >
+              {uploadingId === seg.segment_id ? 'Uploading...' : 'Upload new'}
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp,video/mp4,video/quicktime,video/x-matroska"
+                className="hidden"
+                disabled={uploadingId === seg.segment_id}
+                onChange={e => {
+                  const file = e.target.files?.[0]
+                  e.target.value = ''
+                  if (!file) return
+                  const isVideo = file.type.startsWith('video/')
+                  void handleUpload(seg, isVideo ? 'broll' : 'scene_image', file)
+                }}
+              />
+            </label>
             {seg.source_type !== 'auto' && (
               <button
                 onClick={() => updateSegment(seg.segment_id, 'auto', null)}
@@ -240,12 +334,41 @@ export function EditDecisionListEditor({
         >
           {saving ? 'Saving...' : 'Save Overrides'}
         </button>
+        <button
+          onClick={handleValidate}
+          disabled={validating}
+          className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+          style={{ backgroundColor: '#111', color: '#888', border: '1px solid #333' }}
+        >
+          {validating ? '⟳ Checking…' : 'Run advisory check'}
+        </button>
+        <button
+          onClick={handleLockIn}
+          disabled={lockingIn}
+          className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+          style={{ backgroundColor: '#071a0d', color: '#22c55e', border: '1px solid #22c55e33' }}
+        >
+          {lockingIn ? 'Locking in...' : 'Lock In Overrides'}
+        </button>
         {msg && (
           <span className="text-xs" style={{ color: msg.ok ? '#22c55e' : '#ef4444' }}>
             {msg.text}
           </span>
         )}
       </div>
+
+      {validation && (
+        <div
+          className="text-xs py-2 px-3 rounded-lg mt-3"
+          style={{
+            backgroundColor: validation.passed ? '#071a0d' : '#1a1205',
+            color: validation.passed ? '#22c55e' : '#f59e0b',
+          }}
+        >
+          {validation.passed ? 'Advisory check passed.' : `Advisory check flagged: ${validation.notes}`}
+          {' '}— informational only, does not block locking in.
+        </div>
+      )}
     </div>
   )
 }

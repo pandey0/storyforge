@@ -159,7 +159,7 @@ class VideoCreator:
         for idx, seg in enumerate(timings):
             duration = float(seg.get("duration_est", 30.0))
             section = seg.get("section", "").upper()
-            override = get_segment_override(edl, str(idx))
+            override = get_segment_override(edl, str(idx), slug)
             if override is not None:
                 broll_path = f"data/cases/{slug}/{override.source_path}"
             else:
