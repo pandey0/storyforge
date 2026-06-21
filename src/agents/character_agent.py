@@ -284,7 +284,16 @@ class CharacterAgent:
         for entry in entity_roles:
             if any(kw.lower() in role for kw in entry["keywords"]):
                 return entry["slug"]
-        return role if role else None
+        if not role:
+            return None
+        # Research synthesis can hand back a long descriptive sentence
+        # (e.g. "investigating agency, initially treated death as
+        # suicide, ..."), but this column is a short display tag
+        # (case_characters.role is varchar(100) in the DB) — take the
+        # first clause and hard-truncate as a backstop. The full
+        # description is preserved separately in the character's notes.
+        short = role.split(",")[0].split(".")[0].strip()
+        return (short or role)[:100]
 
     def _extract_from_research(self, research: dict, entity_roles: list[dict]) -> dict[str, dict]:
         chars: dict[str, dict] = {}
