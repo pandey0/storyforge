@@ -1,10 +1,10 @@
 import useSWR from 'swr'
 import { api, Case, CaseProfile, Character, Job, StepConfig, CaseVersion, Checkpoint, ResearchResponse } from './api'
 
-export function useCases() {
+export function useCases(track?: 'longform' | 'shorts') {
   const { data, error, isLoading, mutate } = useSWR(
-    'cases',
-    () => api.getCases(),
+    track ? `cases:${track}` : 'cases',
+    () => api.getCases(track),
     { refreshInterval: 15000 }
   )
   return { cases: (data ?? []) as Case[], error, isLoading, mutate }

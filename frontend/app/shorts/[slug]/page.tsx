@@ -18,6 +18,7 @@ export default function ShortsCasePage({ params }: { params: Promise<{ slug: str
   const { plan, isLoading: planLoading, mutate: mutatePlan } = useShortsPlan(slug)
   const filesMap = files as Record<string, unknown> | undefined
   const [stepRunning, setStepRunning] = useState<Record<string, boolean>>({})
+  const [runningAllEpisodes, setRunningAllEpisodes] = useState(false)
 
   const runStep = useCallback(async (step: string) => {
     setStepRunning(prev => ({ ...prev, [step]: true }))
@@ -30,6 +31,20 @@ export default function ShortsCasePage({ params }: { params: Promise<{ slug: str
       console.error(e)
     } finally {
       setTimeout(() => setStepRunning(prev => ({ ...prev, [step]: false })), 1000)
+    }
+  }, [slug, mutatePlan, mutateFiles])
+
+  const runAllEpisodes = useCallback(async () => {
+    setRunningAllEpisodes(true)
+    try {
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+      await fetch(`${API_BASE}/api/pipeline/${slug}/run_full?track=shorts`, { method: 'POST' })
+      setTimeout(() => { mutatePlan(); mutateFiles() }, 5000)
+      setTimeout(() => { mutatePlan(); mutateFiles() }, 15000)
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setTimeout(() => setRunningAllEpisodes(false), 2000)
     }
   }, [slug, mutatePlan, mutateFiles])
 
@@ -121,7 +136,17 @@ export default function ShortsCasePage({ params }: { params: Promise<{ slug: str
 
       {/* Shared section */}
       <div className="mb-8">
-        <div className="text-[10px] text-[#555] uppercase tracking-wider mb-3 font-medium">Shared</div>
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-[10px] text-[#555] uppercase tracking-wider font-medium">Shared</div>
+          <button
+            onClick={() => runStep('research')}
+            disabled={!!stepRunning['research']}
+            className="text-[10px] px-2 py-1 rounded"
+            style={{ color: ACCENT, backgroundColor: '#071a0d', border: `1px solid ${ACCENT}33` }}
+          >
+            ▶ Run research
+          </button>
+        </div>
         <div className="flex flex-col gap-2">
           {sharedSteps.map(renderStepRow)}
         </div>
@@ -137,7 +162,19 @@ export default function ShortsCasePage({ params }: { params: Promise<{ slug: str
 
       {/* Episodes grid — dynamic count, sourced from shorts_plan.json, not a fixed menu */}
       <div>
-        <div className="text-[10px] text-[#555] uppercase tracking-wider mb-3 font-medium">Episodes</div>
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-[10px] text-[#555] uppercase tracking-wider font-medium">Episodes</div>
+          {hasPlan && (
+            <button
+              onClick={runAllEpisodes}
+              disabled={runningAllEpisodes}
+              className="text-xs px-3 py-1.5 rounded-lg font-medium transition-colors"
+              style={{ backgroundColor: runningAllEpisodes ? '#0d1f15' : ACCENT, color: '#fff', opacity: runningAllEpisodes ? 0.7 : 1 }}
+            >
+              {runningAllEpisodes ? '⟳ Starting...' : '▶ Run All Episodes'}
+            </button>
+          )}
+        </div>
         {!hasPlan ? (
           <div className="text-xs text-[#555] bg-[#111] border border-[#222] rounded-xl p-4">
             {planLoading ? 'Loading…' : 'No episode plan yet — run "Episode Plan" above to decide episode count and angles from this case\'s research.'}

@@ -6,14 +6,6 @@ from newsapi import NewsApiClient
 
 load_dotenv()
 
-QUERIES = [
-    "India crime murder arrested",
-    "India CBI investigation",
-    "India High Court verdict",
-    "India scam fraud arrested",
-    "India Supreme Court criminal",
-]
-
 _REQUEST_LIMIT = 100
 _WARN_THRESHOLD = 80
 
@@ -50,11 +42,11 @@ class NewsAPIClient:
             "published_at": raw.get("publishedAt") or "",
         }
 
-    def search_crime(self, query: str, days_back: int = 7) -> list[dict]:
+    def search_recent(self, query: str, days_back: int = 7) -> list[dict]:
         if not self._tick():
             return []
         from_date = (datetime.utcnow() - timedelta(days=days_back)).strftime("%Y-%m-%d")
-        logger.info("NewsAPI search_crime: query='{}' days_back={}", query, days_back)
+        logger.info("NewsAPI search_recent: query='{}' days_back={}", query, days_back)
         try:
             resp = self._client.get_everything(
                 q=query,
@@ -86,18 +78,8 @@ class NewsAPIClient:
             self._handle_error(exc)
             return []
 
-    def get_top_crime_headlines(self) -> list[dict]:
-        results: list[dict] = []
-        for q in QUERIES:
-            results.extend(self.search_crime(q))
-        seen: set[str] = set()
-        unique: list[dict] = []
-        for art in results:
-            if art["url"] and art["url"] not in seen:
-                seen.add(art["url"])
-                unique.append(art)
-        logger.info("get_top_crime_headlines: {} unique articles", len(unique))
-        return unique
+    def get_top_headlines(self) -> list[dict]:
+        return []
 
     def _handle_error(self, exc: Exception) -> None:
         msg = str(exc).lower()

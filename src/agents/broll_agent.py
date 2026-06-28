@@ -24,36 +24,6 @@ INDIAN_CITIES = {
     "Lucknow", "Chandigarh", "Bhopal",
 }
 
-CRIME_NOUNS = {
-    "murder", "victim", "suspect", "accused", "arrest", "crime", "police",
-    "court", "judge", "trial", "evidence", "investigation", "prison", "jail",
-    "conviction", "sentence", "witness", "FIR", "CBI", "CID", "kidnap",
-    "rape", "assault", "robbery", "fraud", "corruption", "bribe", "smuggling",
-    "extortion", "weapon", "knife", "gun", "death", "body", "morgue",
-}
-
-SECTION_QUERY_MAP = {
-    "COLD OPEN":       lambda loc, kw: f"{loc or 'India'} street people daily life",
-    "THE BREAK":       lambda loc, kw: f"{loc or 'India'} night street dark mystery",
-    "WORLD BUILDING":  lambda loc, kw: f"{loc or 'India'} neighborhood community people",
-    "THE CRIME":       lambda loc, kw: f"{loc or 'India'} street night dark",
-    "INVESTIGATION":   lambda loc, kw: "police investigation India court",
-    "LEGAL BATTLE":    lambda loc, kw: "court India judge law justice",
-    "AFTERMATH":       lambda loc, kw: "candles vigil protest India",
-    "SYSTEMIC ANGLE":  lambda loc, kw: "India justice law system government",
-    "CLOSE":           lambda loc, kw: f"{loc or 'India'} memorial candle people",
-}
-
-SHORTS_TOPIC_QUERY: dict[str, str] = {
-    "who_was_the_victim": "indian family home daily life",
-    "the_accused":        "indian police arrest handcuffs",
-    "the_evidence":       "forensic investigation crime scene india",
-    "the_trial":          "indian courtroom trial lawyer",
-    "the_verdict":        "indian court judge gavel",
-    "systemic_angle":     "india justice system protest",
-    "where_are_they_now": "indian city street present day",
-}
-
 # Markers to strip before keyword extraction — these are TTS/script markers, not content
 _STRIP_BEFORE_KEYWORDS_RE = re.compile(
     r"\[(?:PAUSE\s*[\d.]+\s*s|SLOW|FAST|DRAMATIC|NORMAL|SOURCE:[^\]]*)\]",
@@ -157,11 +127,6 @@ class BRollAgent:
                 seen.add(city)
                 keywords.append(city)
 
-        for noun in CRIME_NOUNS:
-            if re.search(rf"\b{noun}\b", text, re.IGNORECASE) and noun not in seen:
-                seen.add(noun)
-                keywords.append(noun)
-
         return keywords[:10]
 
     def _extract_location(self, text: str) -> Optional[str]:
@@ -171,11 +136,13 @@ class BRollAgent:
         return None
 
     def keyword_to_query(self, keywords: list[str], section: str, location: Optional[str]) -> str:
-        builder = SECTION_QUERY_MAP.get(section)
-        if builder:
-            return builder(location, keywords)
-        first_kw = keywords[0] if keywords else "India city"
-        return f"{location or 'India'} {first_kw}"
+        """Build a Pexels search query from section name + keywords. No hardcoded niche."""
+        # Clean section name: "THE CRIME" → "the crime", "COLD OPEN" → "cold open"
+        section_words = section.lower().replace("_", " ").strip()
+        loc = location or ""
+        kw = " ".join(keywords[:2]) if keywords else ""
+        parts = [p for p in [loc, kw, section_words] if p]
+        return " ".join(parts)[:100]
 
     def search_pexels(self, query: str, duration_min: int = 5) -> list[dict]:
         if not PEXELS_API_KEY:

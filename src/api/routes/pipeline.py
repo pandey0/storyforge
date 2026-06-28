@@ -811,6 +811,216 @@ async def replace_thumbnail(slug: str, file: UploadFile = File(...)):
 
 
 # ---------------------------------------------------------------------------
+# Run Full Pipeline
+# ---------------------------------------------------------------------------
+
+LONGFORM_STEPS = ["research", "characters", "script", "qa", "tts", "broll", "assemble", "thumbnail"]
+SHORTS_STEPS = ["research", "characters", "shorts_plan", "shorts_script", "shorts_tts", "shorts_assemble"]
+
+
+def _run_step_core(slug: str, step: str, log: PipelineLogger) -> None:
+    """Execute a single pipeline step's agent logic without job lifecycle management.
+
+    Called sequentially by run_full_pipeline. Each branch mirrors the inner _run()
+    closure of its individual route handler — same agents, same state, same side
+    effects — but without start_job/finish_job calls so the outer run_full job
+    stays in control of the lifecycle.
+    """
+    import json
+    from pathlib import Path
+
+    if step == "research":
+        from src.agents.case_research_agent import CaseResearchAgent
+        log.info("CaseResearchAgent starting")
+        CaseResearchAgent().run(slug)
+
+    elif step == "characters":
+        from src.agents.character_agent import CharacterAgent
+        state = _build_state(slug)
+        log.info("CharacterAgent starting")
+        CharacterAgent().run(state)
+
+    elif step == "script":
+        from src.agents.script_writer_agent import ScriptWriterAgent
+        state = _build_state(slug)
+        if not state.research_path:
+            raise ValueError("research.json not found — run research step first")
+        log.info("ScriptWriterAgent starting")
+        ScriptWriterAgent().run(state)
+
+    elif step == "qa":
+        from src.agents.qa_agent import QAAgent
+        from src.pipeline.checkpoints import mark_ai_validated
+        state = _build_state(slug)
+        if not state.draft_script_path:
+            raise ValueError("No script found — run script step first")
+        log.info("QAAgent starting")
+        passed, notes = QAAgent().run(state)
+        mark_ai_validated(state.case_id, "script", passed, notes=notes)
+        log.info(f"QA result: passed={passed} notes={notes}")
+
+    elif step == "tts":
+        from src.agents.tts_agent import TTSAgent
+        from src.db.channel_profile import get_profile_for_case
+        from src.agents.audio_validator import validate_audio
+        state = _build_state(slug)
+        if not state.draft_script_path:
+            raise ValueError("No script found — run script step first")
+        cfg_path = Path(f"data/cases/{slug}/configs/tts_config.json")
+        cfg = json.loads(cfg_path.read_text()) if cfg_path.exists() else {}
+        raw_speed = str(cfg.get("speed", "0.92")).split("|")[0]
+        profile = get_profile_for_case(slug)
+        log.info("TTSAgent starting")
+        TTSAgent(
+            speaker=cfg.get("voice", None),
+            speed=float(raw_speed),
+            pitch=float(cfg.get("pitch", 0.0)),
+            loudness=float(cfg.get("loudness", 1.0)),
+            target_language_code=profile.language,
+        ).run(state)
+        passed, notes = validate_audio(state.case_id, slug, track="longform")
+        log.info(f"Audio validation: passed={passed}")
+
+    elif step == "broll":
+        from src.agents.broll_agent import BRollAgent
+        state = _build_state(slug)
+        if not state.draft_script_path:
+            raise ValueError("No script found — run script step first")
+        log.info("BRollAgent starting")
+        BRollAgent().run(state)
+
+    elif step == "assemble":
+        from src.video.assembler import VideoCreator
+        state = _build_state(slug)
+        if not state.audio_path:
+            raise ValueError("No audio found — run TTS step first")
+        log.info("VideoCreator starting")
+        VideoCreator().create(state)
+
+    elif step == "thumbnail":
+        from src.agents.thumbnail_agent import ThumbnailAgent
+        state = _build_state(slug)
+        log.info("ThumbnailAgent starting")
+        ThumbnailAgent().run(state)
+
+    elif step == "shorts_plan":
+        from src.agents.episode_planner_agent import EpisodePlannerAgent
+        state = _build_state(slug)
+        if not state.research_path:
+            raise ValueError("research.json not found — run research step first")
+        log.info("EpisodePlannerAgent starting")
+        EpisodePlannerAgent().run(state)
+
+    elif step == "shorts_script":
+        from src.agents.shorts_script_agent import ShortsScriptAgent
+        state = _build_state(slug)
+        if not state.research_path:
+            raise ValueError("research.json not found — run research step first")
+        log.info("ShortsScriptAgent starting (all topics)")
+        ShortsScriptAgent().run(state)
+
+    elif step == "shorts_tts":
+        import shutil
+        from src.agents.tts_agent import TTSAgent
+        from src.db.channel_profile import get_profile_for_case
+        from src.agents.audio_validator import validate_audio
+        shorts_dir = Path(f"data/cases/{slug}/shorts")
+        md_files = sorted(shorts_dir.glob("*.md")) if shorts_dir.is_dir() else []
+        if not md_files:
+            raise ValueError("No episode scripts found — run shorts_script first")
+        cfg_path = Path(f"data/cases/{slug}/configs/shorts_tts_config.json")
+        cfg = json.loads(cfg_path.read_text()) if cfg_path.exists() else {}
+        raw_speed = str(cfg.get("speed", "0.92")).split("|")[0]
+        profile = get_profile_for_case(slug)
+        state = _build_state(slug)
+        for i, md_path in enumerate(md_files):
+            stem = md_path.stem
+            ep_state = _build_state(slug)
+            ep_state.draft_script_path = str(md_path)
+            ep_state = TTSAgent(
+                speaker=cfg.get("voice", None),
+                speed=float(raw_speed),
+                pitch=float(cfg.get("pitch", 0.0)),
+                loudness=float(cfg.get("loudness", 1.0)),
+                target_language_code=profile.language,
+            ).run(ep_state)
+            audio_src = Path(f"data/cases/{slug}/audio/voiceover.mp3")
+            if audio_src.exists():
+                shutil.copy(str(audio_src), str(shorts_dir / f"{stem}.mp3"))
+            timings_src = Path(f"data/cases/{slug}/audio/word_timings.json")
+            if timings_src.exists():
+                shutil.copy(str(timings_src), str(shorts_dir / f"{stem}_timings.json"))
+            stem_parts = stem.split("_", 1)
+            ep_topic = stem_parts[1] if len(stem_parts) == 2 and stem_parts[0].startswith("ep") else stem
+            passed, notes = validate_audio(state.case_id, slug, track="shorts", topic=ep_topic)
+            log.info(f"Shorts TTS [{i + 1}/{len(md_files)}] {stem}: audio_validation passed={passed}")
+
+    elif step == "shorts_assemble":
+        from src.agents.shorts_assembler_agent import ShortsAssemblerAgent
+        shorts_dir = Path(f"data/cases/{slug}/shorts")
+        md_files = sorted(shorts_dir.glob("*.md")) if shorts_dir.is_dir() else []
+        if not md_files:
+            raise ValueError("No episode scripts — run shorts_script first")
+        mp3_files = list(shorts_dir.glob("*.mp3")) if shorts_dir.is_dir() else []
+        if not mp3_files:
+            raise ValueError("No episode audio — run shorts_tts first")
+        state = _build_state(slug)
+        state.shorts_episode_paths = [str(p) for p in md_files]
+        log.info(f"ShortsAssemblerAgent starting ({len(md_files)} episodes)")
+        ShortsAssemblerAgent().assemble(state)
+
+    else:
+        raise ValueError(f"Unknown step: {step}")
+
+
+@router.post("/{slug}/run_full")
+async def run_full_pipeline(slug: str, track: str = "longform"):
+    """Run all pipeline steps for a track in sequence (in background).
+
+    track: "longform" | "shorts"
+
+    Longform: research → characters → script → qa → tts → broll → assemble → thumbnail
+    Shorts:   research → characters → shorts_plan → shorts_script → shorts_tts → shorts_assemble
+
+    Each step runs synchronously inside a single background thread — steps chain
+    automatically and stop on first failure. Returns immediately; use
+    GET /api/pipeline/{slug}/job to poll status.
+    """
+    from src.db.models import Case
+    from src.db.session import get_session
+
+    if track not in ("longform", "shorts"):
+        raise HTTPException(status_code=400, detail=f"Invalid track '{track}'. Must be 'longform' or 'shorts'.")
+
+    _guard_already_running(slug)
+    with get_session() as session:
+        case = session.query(Case).filter(Case.slug == slug).first()
+        if case is None:
+            raise HTTPException(status_code=404, detail=f"Case '{slug}' not found")
+
+    steps = LONGFORM_STEPS if track == "longform" else SHORTS_STEPS
+    job_id = start_job(slug, f"run_full:{track}")
+    log = PipelineLogger(slug, "run_full")
+    log.info(f"Run full pipeline | track={track} | steps={steps} | job_id={job_id}")
+
+    def _run():
+        total = len(steps)
+        for i, step in enumerate(steps):
+            log.info(f"[{i + 1}/{total}] Starting: {step}")
+            update_job(slug, "running", progress=int(100 * i / total))
+            _run_step_core(slug, step, log)
+            log.info(f"[{i + 1}/{total}] Done: {step}")
+            invalidate_slug(slug)  # refresh cache after each step so UI stays live
+        update_job(slug, "running", progress=100)
+        log.info("All steps complete")
+
+    t = threading.Thread(target=_run_in_thread, args=(_run, slug, "run_full", log), daemon=True)
+    t.start()
+
+    return {"started": True, "slug": slug, "track": track, "steps": steps, "job_id": job_id}
+
+
+# ---------------------------------------------------------------------------
 # Approve / Reject
 # ---------------------------------------------------------------------------
 

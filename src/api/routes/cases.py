@@ -80,18 +80,24 @@ def _file_info(path: Path) -> dict:
 
 
 @router.get("")
-async def list_cases():
-    """Return all cases ordered by updated_at desc."""
+async def list_cases(track: Optional[str] = None):
+    """Return cases ordered by updated_at desc. ?track=longform|shorts filters by case_type."""
     import asyncio
 
-    @ttl_cache(seconds=15)
     def _fetch():
         with get_session() as session:
-            cases = (
-                session.query(Case)
-                .order_by(Case.updated_at.desc())
-                .all()
-            )
+            q = session.query(Case).order_by(Case.updated_at.desc())
+            if track:
+                # Show cases matching track OR untagged (backwards compat)
+                from sqlalchemy import or_, cast, String
+                from sqlalchemy.dialects.postgresql import JSONB
+                q = q.filter(
+                    or_(
+                        Case.extra["case_type"].as_string() == track,
+                        Case.extra["case_type"].is_(None),
+                    )
+                )
+            cases = q.all()
             result = []
             for c in cases:
                 sc = session.query(Script).filter(Script.case_id == c.id).count()

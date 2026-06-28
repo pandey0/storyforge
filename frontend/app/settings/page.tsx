@@ -1,3 +1,8 @@
+'use client'
+
+import Link from 'next/link'
+import { useEffect, useState } from 'react'
+
 export default function SettingsPage() {
   const KEYS = [
     { key: 'GOOGLE_API_KEY', label: 'Google AI (Gemini)', desc: 'Scripts, QA, agent' },
@@ -10,10 +15,23 @@ export default function SettingsPage() {
   ]
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+  const [keyStatus, setKeyStatus] = useState<Record<string, boolean | null>>({})
+
+  useEffect(() => {
+    fetch(`${apiUrl}/api/settings/keys/status`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data) setKeyStatus(data) })
+      .catch(() => {}) // graceful — endpoint may not exist yet
+  }, [apiUrl])
 
   return (
     <div className="p-6 max-w-lg">
-      <h1 className="text-xl font-semibold text-[#e0e0e0] mb-6">Settings</h1>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-xl font-semibold text-[#e0e0e0]">Settings</h1>
+        <Link href="/settings/profiles" className="text-xs text-[#3b82f6] hover:text-[#60a5fa]">
+          Channel Profiles →
+        </Link>
+      </div>
       <div className="bg-[#111] rounded-xl border border-[#222] overflow-hidden">
         <div className="px-4 py-3 border-b border-[#222] text-xs text-[#555]">
           API keys are loaded from .env file — edit it directly on the server
@@ -28,9 +46,11 @@ export default function SettingsPage() {
               <div className="text-sm text-[#e0e0e0]">{label}</div>
               <div className="text-xs text-[#555]">{desc}</div>
             </div>
-            <code className="text-[10px] text-[#555] bg-[#1a1a1a] px-2 py-1 rounded">
-              {key}
-            </code>
+            <div className="flex items-center gap-2">
+              {keyStatus[key] === true && <span style={{ color: '#22c55e', fontSize: '11px' }}>✓ set</span>}
+              {keyStatus[key] === false && <span style={{ color: '#ef4444', fontSize: '11px' }}>✗ missing</span>}
+              <code className="text-[10px] text-[#555] bg-[#1a1a1a] px-2 py-1 rounded">{key}</code>
+            </div>
           </div>
         ))}
       </div>

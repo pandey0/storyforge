@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
 import './globals.css'
 import { Sidebar } from '@/components/Sidebar'
-import { AgentPanel } from '@/components/AgentPanel'
+import { LayoutShell } from '@/components/LayoutShell'
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -15,8 +15,8 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'IndianCrimes Pipeline',
-  description: 'Hindi True Crime YouTube Pipeline',
+  title: 'StoryForge',
+  description: 'AI content production engine — research to video',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -25,13 +25,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body style={{ background: '#0a0a0a', margin: 0 }}>
         <div className="flex min-h-screen">
           <Sidebar />
-          <main
-            className="flex-1 overflow-y-auto"
-            style={{ marginLeft: '220px', marginRight: '320px', minHeight: '100vh' }}
-          >
-            {children}
-          </main>
-          <AgentPanel />
+          <LayoutShell>{children}</LayoutShell>
         </div>
       </body>
     </html>

@@ -5,9 +5,11 @@ import { ActionCard } from './ActionCard'
 
 interface Props {
   caseSlug?: string
+  open?: boolean
+  onToggle?: () => void
 }
 
-export function AgentPanel({ caseSlug }: Props) {
+export function AgentPanel({ caseSlug, open = true, onToggle }: Props) {
   const [messages, setMessages] = useState<AgentMessage[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -67,6 +69,24 @@ export function AgentPanel({ caseSlug }: Props) {
 
   const dismissAction = (id: string) => setActionCards(prev => prev.filter(a => a.id !== id))
 
+  if (!open) {
+    return (
+      <div
+        className="flex flex-col items-center border-l border-[#222] bg-[#0f0f0f]"
+        style={{ width: '48px', height: '100vh', position: 'fixed', right: 0, top: 0 }}
+      >
+        <button
+          onClick={onToggle}
+          title="Open Agent"
+          className="mt-4 flex flex-col items-center gap-1 text-[#555] hover:text-[#e0e0e0] transition-colors"
+        >
+          <div className="w-2 h-2 rounded-full bg-[#22c55e]" style={{ boxShadow: '0 0 6px #22c55e' }} />
+          <span className="text-[9px] mt-1" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>⚡ Agent</span>
+        </button>
+      </div>
+    )
+  }
+
   return (
     <div
       className="flex flex-col border-l border-[#222] bg-[#0f0f0f]"
@@ -77,8 +97,15 @@ export function AgentPanel({ caseSlug }: Props) {
         <div className="w-2 h-2 rounded-full bg-[#22c55e]" style={{ boxShadow: '0 0 6px #22c55e' }} />
         <span className="text-sm font-medium text-[#e0e0e0]">&#x26A1; Agent</span>
         {caseSlug && (
-          <span className="text-xs text-[#555] ml-auto">/{caseSlug}</span>
+          <span className="text-xs text-[#555] ml-2">/{caseSlug}</span>
         )}
+        <button
+          onClick={onToggle}
+          title="Collapse"
+          className="ml-auto text-[#555] hover:text-[#e0e0e0] transition-colors text-sm leading-none"
+        >
+          ›
+        </button>
       </div>
 
       {/* Action cards */}

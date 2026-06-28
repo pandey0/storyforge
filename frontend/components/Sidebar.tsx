@@ -8,6 +8,7 @@ const NAV = [
   { href: '/longform', label: 'Long-form Studio', icon: '📺' },
   { href: '/shorts', label: 'Shorts Studio', icon: '🎬' },
   { href: '/cases', label: 'All Cases', icon: '📁' },
+  { href: '/settings/profiles', label: 'Profiles', icon: '◈' },
   { href: '/settings', label: 'Settings', icon: '⚙' },
 ]
 
@@ -20,8 +21,8 @@ export function Sidebar() {
     <div className="flex flex-col border-r border-[#222] bg-[#0f0f0f] flex-shrink-0"
       style={{ width: '220px', height: '100vh', position: 'fixed', left: 0, top: 0 }}>
       <div className="px-4 py-4 border-b border-[#222]">
-        <div className="font-semibold text-[#e0e0e0] text-sm">🎬 IndianCrimes</div>
-        <div className="text-[10px] text-[#555] mt-0.5">Hindi True Crime</div>
+        <div className="font-semibold text-[#e0e0e0] text-sm">StoryForge</div>
+        <div className="text-[10px] text-[#555] mt-0.5">Content Engine</div>
       </div>
       <nav className="flex flex-col gap-0.5 p-2 flex-1">
         {NAV.map(({ href, label, icon }) => {

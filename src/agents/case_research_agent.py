@@ -11,6 +11,7 @@ import httpx
 from loguru import logger
 from slugify import slugify
 
+from src.db.channel_profile import get_profile_for_case
 from src.db.models import Case, CaseResearch
 from src.db.session import get_session
 from src.pipeline.state import CaseState
@@ -36,6 +37,9 @@ class CaseResearchAgent:
         )
 
     def run(self, slug: str) -> CaseState:
+        # Load channel profile so research sources are profile-driven, not hardcoded
+        profile = get_profile_for_case(slug)
+
         with get_session() as session:
             case: Optional[Case] = (
                 session.query(Case).filter(Case.slug == slug).first()
@@ -48,31 +52,51 @@ class CaseResearchAgent:
             logger.info("run: slug={} case={!r} → status=research", slug, case.name)
 
             ik_results: list[dict] = []
-            news_results: list[dict] = []
+            news_results: list[dict] = []  # NewsAPI removed from run(); kept for backward compat
             web_results: list[dict] = []
+            hindi_results: list[dict] = []
             wiki_data: Optional[dict] = None
 
-            try:
-                ik_results = self._search_indian_kanoon(case.name, slug)
-            except Exception as exc:
-                logger.error("_search_indian_kanoon failed: {}", exc)
+            # Indian Kanoon is only meaningful for legal-judgment profiles
+            _ik_enabled = any(
+                s.get("type") == "legal_judgments"
+                for s in (profile.research_sources or [])
+            )
+            if _ik_enabled:
+                try:
+                    ik_results = self._search_indian_kanoon(case.name, slug)
+                except Exception as exc:
+                    logger.error("_search_indian_kanoon failed: {}", exc)
 
-            try:
-                news_results = self._search_news_archive(case.name)
-            except Exception as exc:
-                logger.error("_search_news_archive failed: {}", exc)
+            # NewsAPI is useless for older cases (30-day lookback only) and
+            # returns hardcoded crime queries — removed from run(). The method
+            # stays intact so external callers that import it aren't broken.
+            news_results = []
 
             try:
                 web_results = self._search_web(case.name)
             except Exception as exc:
                 logger.error("_search_web failed: {}", exc)
 
+            # Enrich Google CSE snippets with actual article text
+            try:
+                web_results = self._scrape_web_content(web_results)
+            except Exception as exc:
+                logger.error("_scrape_web_content failed: {}", exc)
+
+            # Hindi-language sources when the profile language is Hindi
+            if profile.language and profile.language.startswith("hi"):
+                try:
+                    hindi_results = self._search_hindi_sources(case.name)
+                except Exception as exc:
+                    logger.error("_search_hindi_sources failed: {}", exc)
+
             try:
                 wiki_data = self._fetch_wikipedia(case.name)
             except Exception as exc:
                 logger.error("_fetch_wikipedia failed: {}", exc)
 
-            if not ik_results and not news_results and not web_results and wiki_data is None:
+            if not ik_results and not news_results and not web_results and not hindi_results and wiki_data is None:
                 logger.warning(
                     "All external sources returned empty for slug={!r} — proceeding with case DB info only",
                     slug,
@@ -90,10 +114,14 @@ class CaseResearchAgent:
                 "researched_at": datetime.utcnow().isoformat(),
                 "sources": {
                     "indian_kanoon": ik_results,
-                    "news_archive": news_results,
+                    "news_archive": news_results,  # always [] — kept for schema compat
                     # General web search (Google Custom Search) — niche-agnostic,
                     # unlike indian_kanoon (India court judgments only).
+                    # Now enriched with full article text via url_scraper.
                     "general_web": web_results,
+                    # Hindi-language news sources, populated when profile.language
+                    # starts with "hi". Empty list for non-Hindi profiles.
+                    "hindi_news": hindi_results,
                     "wikipedia": wiki_data or {},
                     "cbi_press": [],
                 },
@@ -121,6 +149,8 @@ class CaseResearchAgent:
                 all_items.append({"source_type": "news_archive", **item})
             for item in web_results:
                 all_items.append({"source_type": "general_web", **item})
+            for item in hindi_results:
+                all_items.append({"source_type": "hindi_news", **item})
             if wiki_data:
                 all_items.append({"source_type": "wikipedia", **wiki_data})
 
@@ -130,10 +160,11 @@ class CaseResearchAgent:
             session.commit()
 
             logger.info(
-                "Research complete: {} Indian Kanoon, {} news, {} web, wikipedia={}",
+                "Research complete: {} Indian Kanoon, {} news, {} web, {} hindi, wikipedia={}",
                 len(ik_results),
                 len(news_results),
                 len(web_results),
+                len(hindi_results),
                 wiki_data is not None,
             )
 
@@ -249,6 +280,20 @@ class CaseResearchAgent:
         logger.info("_search_indian_kanoon: case_name={!r}", case_name)
         results = self._ik_client.search_case(case_name, max_results=10)
         logger.debug("_search_indian_kanoon: {} results", len(results))
+        # Enrich top 3 results with full judgment text
+        for result in results[:3]:
+            docid = result.get("docid")
+            if docid:
+                try:
+                    doc = self._ik_client.get_document(docid)
+                    result["full_text"] = (doc.get("text") or "")[:8000]
+                    logger.info(
+                        "IK full text fetched: docid={} chars={}",
+                        docid,
+                        len(result["full_text"]),
+                    )
+                except Exception as exc:
+                    logger.warning("IK get_document failed docid={}: {}", docid, exc)
         return results
 
     def _search_news_archive(self, case_name: str) -> list[dict]:
@@ -261,6 +306,39 @@ class CaseResearchAgent:
         logger.info("_search_web: case_name={!r}", case_name)
         results = self._web_client.search_case(case_name, max_results=10)
         logger.debug("_search_web: {} results", len(results))
+        return results
+
+    def _scrape_web_content(self, web_results: list[dict]) -> list[dict]:
+        """Scrape actual article text from Google CSE result URLs."""
+        from src.scrapers.url_scraper import scrape_urls
+
+        if not web_results:
+            return web_results
+        urls = [r["url"] for r in web_results if r.get("url")][:5]  # top 5 only
+        scraped = scrape_urls(urls, max_workers=3)
+        scraped_map = {s["url"]: s["text"] for s in scraped if s["success"]}
+        for result in web_results:
+            url = result.get("url", "")
+            if url in scraped_map and scraped_map[url]:
+                result["content"] = scraped_map[url]  # replaces the 140-char snippet
+        return web_results
+
+    def _search_hindi_sources(self, case_name: str) -> list[dict]:
+        """Search Hindi news sources via Google CSE when profile language is Hindi."""
+        from src.scrapers.url_scraper import scrape_urls
+
+        hindi_query = (
+            f"{case_name} site:ndtv.in OR site:amarujala.com OR "
+            "site:navbharattimes.indiatimes.com OR site:bhaskar.com"
+        )
+        results = self._web_client.search_case(hindi_query, max_results=5)
+        if results:
+            urls = [r["url"] for r in results if r.get("url")]
+            scraped = scrape_urls(urls, max_workers=3)
+            scraped_map = {s["url"]: s["text"] for s in scraped if s["success"]}
+            for r in results:
+                if r.get("url") in scraped_map:
+                    r["content"] = scraped_map[r["url"]]
         return results
 
     def _fetch_wikipedia(self, case_name: str) -> Optional[dict]:

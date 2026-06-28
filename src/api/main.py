@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from src.api.routes import audio, audio_segments, cases, characters, checkpoints, edl, logs, pipeline, profiles, research, scripts, steps
+from src.api.routes import audio, audio_segments, cases, characters, checkpoints, edl, logs, pipeline, profiles, research, scripts, steps, topics
 from src.api.routes import agent as agent_router
 
 
@@ -26,8 +26,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="IndianCrimes API",
-    description="Backend for the IndianCrimes Hindi true crime YouTube channel pipeline",
+    title="StoryForge API",
+    description="Backend for the StoryForge content production engine",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -70,6 +70,7 @@ app.include_router(edl.router, prefix="/api")
 app.include_router(profiles.router, prefix="/api")
 app.include_router(checkpoints.router, prefix="/api")
 app.include_router(research.router, prefix="/api")
+app.include_router(topics.router, prefix="/api")
 
 
 # ---------------------------------------------------------------------------

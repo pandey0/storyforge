@@ -8,7 +8,7 @@ import { CaseListSkeleton } from '@/components/Skeleton'
 const ACCENT = '#22c55e'
 
 export default function ShortsStudioPage() {
-  const { cases, isLoading } = useCases()
+  const { cases, isLoading } = useCases('shorts')
 
   return (
     <div className="p-6">

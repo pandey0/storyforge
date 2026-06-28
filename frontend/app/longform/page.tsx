@@ -47,14 +47,14 @@ function LongformCaseCard({ c }: { c: Case }) {
 }
 
 export default function LongformPage() {
-  const { cases, isLoading } = useCases()
+  const { cases, isLoading } = useCases('longform')
 
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-semibold text-[#e0e0e0]">Long-form Studio</h1>
-          <p className="text-xs text-[#555] mt-1">30-45 min Hindi documentaries</p>
+          <p className="text-xs text-[#555] mt-1">30-45 min documentaries</p>
         </div>
         <Link href="/longform/new"
           className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[#3b82f6] text-white hover:bg-[#2563eb] transition-colors">

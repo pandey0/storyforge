@@ -30,17 +30,6 @@ _HINDI_NAME_SUFFIXES = {
     "पांडे", "तिवारी", "दीक्षित", "श्रीवास्तव", "अग्रवाल", "बंसल",
 }
 
-# Kept hardcoded (not moved to ChannelProfile.entity_roles): a tightly-coupled
-# victim/accused disambiguation heuristic, not a general role taxonomy.
-# These words are near-definitive — if they appear near a name, that role wins
-ROLE_STRONG_SIGNALS = {
-    # Only signals that can ONLY apply to an accused (not victim)
-    "accused": {"हत्यारा", "क़ातिल", "कातिल", "आरोपी", "गिरफ़्तार", "सज़ा", "दोषी",
-                "ने गोली", "ने गोली मारी"},  # "ne goli mari" = "he shot" → shooter only
-    # Signals that only apply to a victim
-    "victim":  {"पीड़ित", "मृतक", "की हत्या", "हत्या की शिकार", "को गोली"},  # "ko goli" = "was shot"
-}
-
 
 class CharacterAgent:
     """
@@ -128,16 +117,7 @@ class CharacterAgent:
             logger.warning("openai package not installed — skipping AI portrait for %s", name)
             return None
 
-        _ROLE_DESC = {
-            "victim":  "innocent person who became a victim of crime",
-            "accused": "person accused in a criminal case",
-            "judge":   "senior Indian judge in formal judicial attire",
-            "lawyer":  "Indian lawyer in black court robes",
-            "witness": "ordinary Indian citizen called as witness",
-            "police":  "Indian police officer in khaki uniform",
-            "family":  "ordinary Indian person, family member",
-        }
-        role_desc = _ROLE_DESC.get(role or "", "ordinary Indian person")
+        role_desc = (role or "subject").replace("_", " ")
         context = (notes or "")[:80].strip()
         prompt = (
             f"Realistic, dignified documentary portrait illustration of an Indian person. "
@@ -407,7 +387,6 @@ class CharacterAgent:
 
         # Collect all occurrences, check context around each
         role_scores: dict[str, int] = {}
-        strong_hits: dict[str, int] = {}
         start = 0
         while True:
             idx = script.find(name, start)
@@ -417,15 +396,7 @@ class CharacterAgent:
             for entry in entity_roles:
                 if any(kw in context for kw in entry["keywords"]):
                     role_scores[entry["slug"]] = role_scores.get(entry["slug"], 0) + 1
-            # Check strong signals — these override weak frequency wins
-            for role, signals in ROLE_STRONG_SIGNALS.items():
-                if any(sig in context for sig in signals):
-                    strong_hits[role] = strong_hits.get(role, 0) + 1
             start = idx + 1
-
-        # Strong signals override everything
-        if strong_hits:
-            return max(strong_hits, key=strong_hits.get)
 
         if role_scores:
             return max(role_scores, key=role_scores.get)

@@ -1,5 +1,37 @@
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
+export interface FullProfile {
+  id: string
+  slug: string
+  name: string
+  language: string
+  voice_system_prompt: string
+  section_headers: string[]
+  case_prompt_template: string
+  word_count_range: [number, number]
+  shorts_topics: { slug: string; label: string }[]
+  shorts_episode_prompt_template: string
+  shorts_word_range: [number, number]
+  shorts_planner_prompt: string
+  entity_roles: { slug: string; label: string; keywords: string[] }[]
+  research_sources: { name: string; type: string; base_url: string | null }[]
+}
+
+export interface ProfileCreateBody {
+  name: string
+  language: string
+  voice_system_prompt: string
+  section_headers: string[]
+  case_prompt_template: string
+  word_count_range: [number, number]
+  shorts_topics: { slug: string; label: string }[]
+  shorts_episode_prompt_template: string
+  shorts_word_range: [number, number]
+  shorts_planner_prompt: string
+  entity_roles: { slug: string; label: string; keywords: string[] }[]
+  research_sources: { name: string; type: string; base_url: string | null }[]
+}
+
 export interface Case {
   id: string
   slug: string
@@ -12,6 +44,7 @@ export interface Case {
   notes?: string
   tier?: number
   channel_profile_id?: string
+  extra?: Record<string, unknown>
 }
 
 export interface CaseProfile {
@@ -131,7 +164,7 @@ async function apiFetch(path: string, opts?: RequestInit) {
 }
 
 export const api = {
-  getCases: (): Promise<Case[]> => apiFetch('/api/cases'),
+  getCases: (track?: string): Promise<Case[]> => apiFetch(`/api/cases${track ? `?track=${track}` : ''}`),
   getCase: (slug: string) => apiFetch(`/api/cases/${slug}`),
   createCase: (data: Partial<Case> & { name: string }) =>
     apiFetch('/api/cases', { method: 'POST', body: JSON.stringify(data) }),
@@ -141,6 +174,13 @@ export const api = {
   getCaseProfile: (slug: string): Promise<CaseProfile> => apiFetch(`/api/cases/${slug}/profile`),
   getProfiles: (): Promise<{ id: string; slug: string; name: string; language: string }[]> =>
     apiFetch('/api/profiles'),
+  getProfile: (slug: string): Promise<FullProfile> => apiFetch(`/api/profiles/${slug}`),
+  createProfile: (data: ProfileCreateBody): Promise<FullProfile> =>
+    apiFetch('/api/profiles', { method: 'POST', body: JSON.stringify(data) }),
+  updateProfile: (slug: string, data: Partial<ProfileCreateBody>): Promise<FullProfile> =>
+    apiFetch(`/api/profiles/${slug}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteProfile: (slug: string) =>
+    apiFetch(`/api/profiles/${slug}`, { method: 'DELETE' }),
 
   runStep: (slug: string, step: string, topic?: string) =>
     apiFetch(`/api/pipeline/${slug}/${step}${topic ? `?topic=${topic}` : ''}`, { method: 'POST' }),

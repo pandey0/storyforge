@@ -4,7 +4,6 @@ import io
 import os
 from pathlib import Path
 
-import requests
 from loguru import logger
 from PIL import Image, ImageDraw, ImageFont
 
@@ -100,30 +99,13 @@ class ThumbnailAgent:
         )
 
     def _generate_image(self, case_name: str, victim_name: str, case_type: str) -> bytes:
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            logger.warning("OPENAI_API_KEY missing — using fallback solid image")
-            return self._fallback_image_bytes()
+        from src.providers.image_gen import TaskType, generate_image
 
+        prompt = self._build_prompt(case_name, victim_name)
         try:
-            from openai import OpenAI
-
-            client = OpenAI(api_key=api_key)
-            prompt = self._build_prompt(case_name, victim_name)
-            response = client.images.generate(
-                model="dall-e-3",
-                prompt=prompt,
-                size="1792x1024",
-                quality="standard",
-                n=1,
-            )
-            url = response.data[0].url
-            logger.info(f"DALL-E 3 image URL: {url}")
-            resp = requests.get(url, timeout=60)
-            resp.raise_for_status()
-            return resp.content
+            return generate_image(prompt, task=TaskType.THUMBNAIL)
         except Exception as exc:
-            logger.warning(f"DALL-E generation failed ({exc}) — using fallback image")
+            logger.warning(f"Image generation failed ({exc}) — using fallback image")
             return self._fallback_image_bytes()
 
     def _fallback_image_bytes(self) -> bytes:

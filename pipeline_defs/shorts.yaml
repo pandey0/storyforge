@@ -1,0 +1,90 @@
+version: "1.0"
+name: shorts
+description: "7 episodic 9:16 reels: research → episode_plan → scripts → tts → assemble"
+
+stages:
+  - id: research
+    label: Research
+    desc: "Same research.json used by longform — shared step"
+    track: shared
+    api_step: research
+    artifact_key: research
+    type: step
+    prereq:
+      blocking: true
+      blocked_by: ""
+
+  - id: characters
+    label: Characters
+    desc: "Same character extraction — shared step"
+    track: shared
+    api_step: characters
+    artifact_key: characters_count
+    type: step
+    prereq:
+      file_key: research
+      blocking: false
+      blocked_by: Research
+
+  - id: shorts_plan
+    label: Episode Plan
+    desc: "Gemini — decides episode count + angles from research.json"
+    track: shorts
+    api_step: shorts_plan
+    artifact_key: shorts_plan_count
+    type: step
+    prereq:
+      file_key: research
+      blocking: true
+      blocked_by: Research
+
+  - id: shorts_script
+    label: Episode Scripts
+    desc: "Gemini — standalone Hindi episode scripts, one per planned episode"
+    track: shorts
+    api_step: shorts_script
+    artifact_key: shorts_script_count
+    type: step
+    prereq:
+      count_key: shorts_plan_count
+      blocking: true
+      blocked_by: Episode Plan
+
+  - id: shorts_tts
+    label: Episode Audio
+    desc: "Sarvam Bulbul — per-episode Hindi voiceover (60-90s each)"
+    track: shorts
+    api_step: shorts_tts
+    artifact_key: shorts_audio_count
+    type: step
+    prereq:
+      count_key: shorts_script_count
+      blocking: true
+      blocked_by: Episode Scripts
+
+  - id: shorts_assemble
+    label: Shorts Assembly
+    desc: "FFmpeg — blur-box 9:16 + captions + hook frame → vertical .mp4"
+    track: shorts
+    api_step: shorts_assemble
+    artifact_key: null
+    type: step
+    prereq:
+      count_key: shorts_audio_count
+      blocking: true
+      blocked_by: Episode Audio
+
+providers:
+  llm: "gemini-2.5-flash"
+  tts: "sarvam-bulbul-v2"
+  image_gen_primary: "openrouter/google/gemini-2.5-flash-image"
+  broll_primary: "pexels"
+  broll_secondary: "archive_org"
+  composition: "ffmpeg"
+
+output:
+  format: "H.264"
+  resolution: "1080x1920"
+  aspect: "9:16"
+  container: "mp4"
+  episodes_per_case: 7

@@ -2,7 +2,7 @@
 import { use, useState, useCallback } from 'react'
 import Link from 'next/link'
 import { api } from '@/lib/api'
-import { useCase, useJob, useCaseFiles, useScript, useCharacters, useCheckpoint } from '@/lib/swr-hooks'
+import { useCase, useJob, useCaseFiles, useScript, useCharacters, useCheckpoint, useResearch } from '@/lib/swr-hooks'
 import { PipelineStepper } from '@/components/PipelineStepper'
 import { LiveTerminal } from '@/components/LiveTerminal'
 import { FileStatusGrid } from '@/components/FileStatusGrid'
@@ -15,6 +15,28 @@ const TABS = ['Pipeline', 'Script', 'Characters', 'Audio', 'Video', 'Data', 'Log
 type Tab = typeof TABS[number]
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+
+const ROLE_PALETTE = ['#3b82f6', '#22c55e', '#f59e0b', '#8b5cf6', '#f97316', '#06b6d4', '#ec4899', '#6b7280']
+
+function roleColor(role: string): string {
+  let hash = 0
+  for (let i = 0; i < role.length; i++) hash = ((hash << 5) - hash) + role.charCodeAt(i)
+  return ROLE_PALETTE[Math.abs(hash) % ROLE_PALETTE.length]
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  queued: 'Queued',
+  research: 'Researching',
+  scripting: 'Writing Script',
+  human_review: 'Awaiting Review',
+  tts: 'Generating Audio',
+  broll: 'Gathering Footage',
+  assembling: 'Assembling Video',
+  thumbnail: 'Making Thumbnail',
+  publishing: 'Publishing',
+  published: 'Published',
+  failed: 'Failed',
+}
 
 export default function CaseDetailPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = use(params)
@@ -76,7 +98,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ slug: str
             )}
             <span className="text-xs px-2 py-0.5 rounded-full"
               style={{ backgroundColor: `${statusColor(caseData.status)}22`, color: statusColor(caseData.status) }}>
-              {caseData.status}
+              {STATUS_LABELS[caseData.status] ?? caseData.status}
             </span>
           </div>
         </div>
@@ -485,6 +507,16 @@ function ScriptTab({ slug }: { slug: string }) {
           QA: {script.qa_notes}
         </div>
       )}
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-xs text-[#555]">{wordCount.toLocaleString()} words · ~{durationMin} min</span>
+        <Link
+          href={`/cases/${slug}/review`}
+          className="text-xs font-medium"
+          style={{ color: '#3b82f6' }}
+        >
+          ✏ Edit in Review →
+        </Link>
+      </div>
       <textarea
         value={currentText}
         onChange={e => setText(e.target.value)}
@@ -533,16 +565,6 @@ function CharactersTab({ slug }: { slug: string }) {
   const [validating, setValidating] = useState(false)
   const [checkpointActioning, setCheckpointActioning] = useState(false)
   const [checkpointMsg, setCheckpointMsg] = useState<{ text: string; ok: boolean } | null>(null)
-
-  const ROLE_COLORS: Record<string, string> = {
-    victim: '#22c55e',
-    accused: '#ef4444',
-    judge: '#3b82f6',
-    lawyer: '#8b5cf6',
-    witness: '#f59e0b',
-    family: '#f97316',
-    police: '#6b7280',
-  }
 
   const addChar = async () => {
     if (!newChar.name) return
@@ -737,7 +759,7 @@ function CharactersTab({ slug }: { slug: string }) {
               <div className="text-sm font-medium text-[#e0e0e0] mb-1">{c.name}</div>
               {c.role && (
                 <span className="text-[10px] px-2 py-0.5 rounded-full"
-                  style={{ backgroundColor: `${ROLE_COLORS[c.role] || '#888'}22`, color: ROLE_COLORS[c.role] || '#888' }}>
+                  style={{ backgroundColor: `${c.role ? roleColor(c.role) : '#888'}22`, color: c.role ? roleColor(c.role) : '#888' }}>
                   {c.role}
                 </span>
               )}
@@ -774,7 +796,7 @@ function CharactersTab({ slug }: { slug: string }) {
               <select value={newChar.role} onChange={e => setNewChar(p => ({ ...p, role: e.target.value }))}
                 className="bg-[#0a0a0a] border border-[#333] rounded px-2 py-1.5 text-xs text-[#e0e0e0] focus:outline-none">
                 <option value="">No role</option>
-                {Object.keys(ROLE_COLORS).map(r => <option key={r} value={r}>{r}</option>)}
+                {['victim', 'accused', 'judge', 'lawyer', 'witness', 'family', 'police'].map(r => <option key={r} value={r}>{r}</option>)}
               </select>
               <div className="flex gap-2">
                 <button onClick={addChar} className="flex-1 px-2 py-1 bg-[#3b82f6] rounded text-xs text-white">Add</button>
@@ -815,23 +837,58 @@ function AudioTab({ slug }: { slug: string }) {
 // ---- Video Tab ----
 function VideoTab({ slug }: { slug: string }) {
   const { files, isLoading } = useCaseFiles(slug)
+  const { caseData } = useCase(slug)
   if (isLoading) return <SkeletonCard className="h-20" />
 
   const video = files?.['video'] as { exists: boolean; size_mb?: number } | undefined
-  if (!video?.exists) return (
-    <div className="text-center py-16 text-[#555]">
-      No video yet. Run Assemble from the Pipeline tab.
-    </div>
-  )
+  const thumbnail = files?.['thumbnail'] as { exists: boolean; size_mb?: number } | undefined
 
   return (
-    <div>
-      <div className="text-xs text-[#555] mb-4">
-        video_final.mp4{video.size_mb != null ? ` · ${video.size_mb.toFixed(1)} MB` : ''}
-      </div>
-      <video controls className="w-full rounded-xl" style={{ maxHeight: '500px', background: '#000' }}>
-        <source src={`${API_BASE}/files/cases/${slug}/output/video_final.mp4`} type="video/mp4" />
-      </video>
+    <div className="flex flex-col gap-6">
+      {/* Thumbnail section */}
+      {thumbnail?.exists ? (
+        <div>
+          <div className="text-xs text-[#555] mb-2 uppercase tracking-wider font-medium">Thumbnail</div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={`${API_BASE}/files/cases/${slug}/thumbnail.png`}
+            alt="thumbnail"
+            className="rounded-lg"
+            style={{ maxWidth: '480px', width: '100%' }}
+          />
+        </div>
+      ) : (
+        <div className="text-xs text-[#555]">No thumbnail yet — run the Thumbnail step.</div>
+      )}
+
+      {/* Video section */}
+      {video?.exists ? (
+        <div>
+          <div className="text-xs text-[#555] mb-2">
+            video_final.mp4{video.size_mb != null ? ` · ${video.size_mb.toFixed(1)} MB` : ''}
+          </div>
+          <video controls className="w-full rounded-xl" style={{ maxHeight: '500px', background: '#000' }}>
+            <source src={`${API_BASE}/files/cases/${slug}/output/video_final.mp4`} type="video/mp4" />
+          </video>
+        </div>
+      ) : (
+        <div className="text-xs text-[#555]">No video yet. Run Assemble from the Pipeline tab.</div>
+      )}
+
+      {/* YouTube link — show if case has a youtube_url field */}
+      {(caseData as Record<string, unknown>)?.youtube_url && (
+        <div>
+          <div className="text-xs text-[#555] mb-1">Published on YouTube</div>
+          <a
+            href={(caseData as Record<string, unknown>).youtube_url as string}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm text-[#3b82f6] hover:text-[#60a5fa]"
+          >
+            Watch on YouTube →
+          </a>
+        </div>
+      )}
     </div>
   )
 }
@@ -840,6 +897,7 @@ function VideoTab({ slug }: { slug: string }) {
 function DataTab({ slug }: { slug: string }) {
   const { files } = useCaseFiles(slug)
   const { script } = useScript(slug)
+  const { mutate: mutateResearch } = useResearch(slug)
   const [rawData, setRawData] = useState<string | null>(null)
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const [loadingRaw, setLoadingRaw] = useState(false)
@@ -873,7 +931,32 @@ function DataTab({ slug }: { slug: string }) {
   }
 
   return (
-    <div className="flex gap-4" style={{ height: 'calc(100vh - 220px)' }}>
+    <div className="flex flex-col gap-4" style={{ height: 'calc(100vh - 220px)', overflowY: 'auto' }}>
+
+      {/* Research Quality panel */}
+      <div className="rounded-xl border border-[#222] bg-[#111] p-4 flex-shrink-0">
+        <div className="text-xs font-semibold text-[#888] uppercase tracking-wider mb-3">Research</div>
+        <div className="text-xs text-[#555]">
+          {files?.['research'] && (files['research'] as { exists: boolean }).exists
+            ? 'research.json present'
+            : 'No research data — run the Research step first.'}
+        </div>
+        <div className="border-t border-[#222] mt-3 pt-3 flex justify-end">
+          <button
+            onClick={() => {
+              fetch(`${API_BASE}/api/pipeline/${slug}/steps/research`, { method: 'POST' })
+                .then(() => setTimeout(() => mutateResearch(), 5000))
+                .catch(console.error)
+            }}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+            style={{ backgroundColor: '#111', color: '#888', border: '1px solid #333' }}
+          >
+            ↺ Rerun Research
+          </button>
+        </div>
+      </div>
+
+      <div className="flex gap-4 flex-1 min-h-0">
       {/* File list */}
       <div className="flex flex-col gap-2 flex-shrink-0" style={{ width: '200px' }}>
         <div className="text-xs text-[#555] mb-2">Raw Files</div>
@@ -936,6 +1019,7 @@ function DataTab({ slug }: { slug: string }) {
             </pre>
           </div>
         )}
+      </div>
       </div>
     </div>
   )

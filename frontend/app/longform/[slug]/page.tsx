@@ -91,6 +91,8 @@ export default function LongformCaseWorkspace({ params }: { params: Promise<{ sl
   const { job } = useJob(slug)
   const [stepRunning, setStepRunning] = useState<Record<string, boolean>>({})
   const [unpublishing, setUnpublishing] = useState(false)
+  const [runningAll, setRunningAll] = useState(false)
+  const [runAllError, setRunAllError] = useState('')
 
   const unpublish = useCallback(async () => {
     if (!window.confirm(
@@ -117,6 +119,23 @@ export default function LongformCaseWorkspace({ params }: { params: Promise<{ sl
       console.error(e)
     } finally {
       setTimeout(() => setStepRunning(prev => ({ ...prev, [apiStep]: false })), 500)
+    }
+  }, [slug])
+
+  const runAll = useCallback(async () => {
+    setRunningAll(true)
+    setRunAllError('')
+    try {
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+      const res = await fetch(`${API_BASE}/api/pipeline/${slug}/run_full?track=longform`, { method: 'POST' })
+      if (!res.ok) throw new Error(await res.text())
+      setTimeout(() => mutate(`case:${slug}`), 3000)
+      setTimeout(() => mutate(`case:${slug}`), 8000)
+      setTimeout(() => mutate(`case:${slug}`), 20000)
+    } catch (e) {
+      setRunAllError(String(e))
+    } finally {
+      setTimeout(() => setRunningAll(false), 2000)
     }
   }, [slug])
 
@@ -176,6 +195,28 @@ export default function LongformCaseWorkspace({ params }: { params: Promise<{ sl
           {[caseData.subject_name, caseData.location, caseData.year_of_crime].filter(Boolean).join(' · ')}
         </div>
       )}
+
+      {/* Run All button */}
+      <div className="flex items-center justify-between mb-6">
+        <div className="text-[10px] text-[#555]">
+          Run steps individually below, or kick off the full pipeline:
+        </div>
+        <div className="flex items-center gap-3">
+          {runAllError && <span className="text-xs text-[#ef4444]">{runAllError}</span>}
+          <button
+            onClick={runAll}
+            disabled={runningAll || isRunning}
+            className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+            style={{
+              backgroundColor: runningAll ? '#0d1629' : '#3b82f6',
+              color: '#fff',
+              opacity: runningAll || isRunning ? 0.6 : 1,
+            }}
+          >
+            {runningAll ? '⟳ Starting pipeline...' : '▶ Run All Steps'}
+          </button>
+        </div>
+      </div>
 
       {/* Shared section */}
       <div className="mb-8">

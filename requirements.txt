@@ -50,6 +50,9 @@ plotly==5.18.0
 # Maps
 folium==0.15.1
 
+# Pipeline manifest
+PyYAML>=6.0
+
 # Utilities
 python-slugify==8.0.1
 httpx==0.25.2

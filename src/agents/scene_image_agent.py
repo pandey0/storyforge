@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-import base64
 import json
-import os
 import re
 from pathlib import Path
 from typing import Optional
 
-import httpx
 from loguru import logger
 
 from src.db.models import Case, CaseCharacter
@@ -19,9 +16,6 @@ from src.db.session import get_session
 _MAX_IMAGES_PER_EPISODE = 4
 
 _SCENE_EXCERPT_CHARS = 120
-
-_OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-_OPENROUTER_MODEL = "google/gemini-2.5-flash-image"
 
 _PROMPT_SUFFIX = (
     "Realistic documentary-style scene illustration. Indian setting. "
@@ -38,9 +32,6 @@ class SceneImageAgent:
 
     def run(self, slug: str, topic_slug: str) -> list[dict]:
         self._warn_if_characters_unapproved(slug)
-
-        if not self._openrouter_available():
-            return []
 
         md_path = self._find_script_file(slug, topic_slug)
         if md_path is None:
@@ -105,16 +96,6 @@ class SceneImageAgent:
                 "Using unapproved character set for {} — consider reviewing /cases/{}/ characters tab",
                 slug, slug,
             )
-
-    # ------------------------------------------------------------------
-    # Availability check — graceful degradation, no partial work
-    # ------------------------------------------------------------------
-
-    def _openrouter_available(self) -> bool:
-        if not os.environ.get("OPENROUTER_API_KEY"):
-            logger.warning("OPENROUTER_API_KEY not set — skipping scene image generation")
-            return False
-        return True
 
     # ------------------------------------------------------------------
     # Segment loading — mirrors shorts_assembler_agent's lookup style
@@ -246,7 +227,7 @@ class SceneImageAgent:
         return selected
 
     # ------------------------------------------------------------------
-    # DALL-E generation
+    # Image generation (provider-routed via src.providers.image_gen)
     # ------------------------------------------------------------------
 
     def _build_prompt(self, segment: dict, character: Optional[dict]) -> str:
@@ -265,32 +246,17 @@ class SceneImageAgent:
     def _generate_for_segment(
         self, segment: dict, character: Optional[dict], out_dir: Path
     ) -> Optional[dict]:
+        from src.providers.image_gen import TaskType, generate_image
+
         prompt = self._build_prompt(segment, character)
         dest = out_dir / f"seg_{segment['index']:02d}.png"
 
         try:
-            resp = httpx.post(
-                _OPENROUTER_URL,
-                headers={
-                    "Authorization": f"Bearer {os.environ.get('OPENROUTER_API_KEY')}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": _OPENROUTER_MODEL,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "modalities": ["image", "text"],
-                },
-                timeout=60,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            images = data["choices"][0]["message"].get("images") or []
-            if not images:
-                logger.warning("OpenRouter returned no image for segment {}: {!r}", segment["index"], data)
+            image_bytes = generate_image(prompt, task=TaskType.SCENE_IMAGE)
+            if not image_bytes:
+                logger.warning("No image bytes returned for segment {}", segment["index"])
                 return None
-            data_url = images[0]["image_url"]["url"]
-            b64_payload = data_url.split(",", 1)[1] if "," in data_url else data_url
-            dest.write_bytes(base64.b64decode(b64_payload))
+            dest.write_bytes(image_bytes)
             logger.info("Scene image saved: {}", dest)
             return {
                 "segment_index": segment["index"],

@@ -5,16 +5,17 @@ import { useCases } from '@/lib/swr-hooks'
 import { DashboardSkeleton } from '@/components/Skeleton'
 
 export default function Home() {
-  const { cases, isLoading } = useCases()
+  const { cases: longformCases, isLoading: lfLoading } = useCases('longform')
+  const { cases: shortsCases, isLoading: shLoading } = useCases('shorts')
   const router = useRouter()
 
-  if (isLoading) return <DashboardSkeleton />
+  if (lfLoading || shLoading) return <DashboardSkeleton />
 
-  const inProgress = cases.filter(c => !['queued', 'published'].includes(c.status)).length
+  const inProgress = longformCases.filter(c => !['queued', 'published'].includes(c.status)).length
 
   return (
     <div className="p-6 flex flex-col" style={{ minHeight: '100vh' }}>
-      <h1 className="text-xl font-semibold text-[#e0e0e0] mb-1">IndianCrimes Studio</h1>
+      <h1 className="text-xl font-semibold text-[#e0e0e0] mb-1">StoryForge</h1>
       <p className="text-sm text-[#555] mb-8">Pick a track to start working.</p>
 
       <div className="flex-1 flex items-center justify-center">
@@ -37,9 +38,9 @@ export default function Home() {
                 <div className="text-sm text-[#888]">30-45 min documentaries</div>
               </div>
               <div className="mt-8">
-                <div className="text-3xl font-bold" style={{ color: '#3b82f6' }}>{cases.length}</div>
+                <div className="text-3xl font-bold" style={{ color: '#3b82f6' }}>{longformCases.length}</div>
                 <div className="text-xs text-[#555] mt-1">
-                  {inProgress > 0 ? `${inProgress} cases in production` : 'cases total'}
+                  {inProgress > 0 ? `${inProgress} in production` : 'cases total'}
                 </div>
                 <div className="mt-4 text-sm font-medium" style={{ color: '#3b82f6' }}>Open Long-form Studio →</div>
               </div>
@@ -64,7 +65,7 @@ export default function Home() {
                 <div className="text-sm text-[#888]">7 episodic reels per case</div>
               </div>
               <div className="mt-8">
-                <div className="text-3xl font-bold" style={{ color: '#22c55e' }}>{cases.length}</div>
+                <div className="text-3xl font-bold" style={{ color: '#22c55e' }}>{shortsCases.length}</div>
                 <div className="text-xs text-[#555] mt-1">cases total</div>
                 <div className="mt-4 text-sm font-medium" style={{ color: '#22c55e' }}>Open Shorts Studio →</div>
               </div>

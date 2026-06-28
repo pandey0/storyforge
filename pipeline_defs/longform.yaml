@@ -1,0 +1,112 @@
+version: "1.0"
+name: longform
+description: "30-45 min Hindi documentary: research → script → review → broll → tts → assemble → thumbnail"
+
+stages:
+  - id: research
+    label: Research
+    desc: "Scrape Indian Kanoon, news archive, Wikipedia → research.json"
+    track: shared
+    api_step: research
+    artifact_key: research
+    type: step
+    prereq:
+      blocking: true
+      blocked_by: ""
+
+  - id: characters
+    label: Characters
+    desc: "Extract named people, assign roles, add photos"
+    track: shared
+    api_step: characters
+    artifact_key: characters_count
+    type: step
+    prereq:
+      file_key: research
+      blocking: false
+      blocked_by: Research
+
+  - id: script
+    label: Script
+    desc: "Gemini 2.5 Flash — 30-45 min Hindi documentary script"
+    track: longform
+    api_step: script
+    artifact_key: script_draft
+    type: step
+    prereq:
+      file_key: research
+      blocking: true
+      blocked_by: Research
+
+  - id: human_review
+    label: Review
+    desc: "AI QA check → human approve/reject before audio production"
+    track: longform
+    api_step: null
+    artifact_key: null
+    type: gate
+    prereq:
+      blocking: true
+      blocked_by: Script
+
+  - id: broll
+    label: B-Roll
+    desc: "Fetch stock footage per section (Pexels + Archive.org) → 16:9 clips"
+    track: longform
+    api_step: broll
+    artifact_key: null
+    type: step
+    prereq:
+      file_key: script_draft
+      blocking: false
+      blocked_by: Script
+
+  - id: tts
+    label: TTS Audio
+    desc: "Sarvam Bulbul v2 — single 30-45 min Hindi voiceover"
+    track: longform
+    api_step: tts
+    artifact_key: audio
+    type: step
+    prereq:
+      after_status: human_review
+      blocking: true
+      blocked_by: "Script + Review gate"
+
+  - id: assemble
+    label: Video Assembly
+    desc: "FFmpeg — audio + b-roll + overlays → H.264 1080p 16:9"
+    track: longform
+    api_step: assemble
+    artifact_key: video
+    type: step
+    prereq:
+      file_key: audio
+      blocking: true
+      blocked_by: TTS Audio
+
+  - id: thumbnail
+    label: Thumbnail
+    desc: "Provider-scored image gen + Pillow overlay → 1280×720 JPG"
+    track: longform
+    api_step: thumbnail
+    artifact_key: thumbnail
+    type: step
+    prereq:
+      blocking: false
+      blocked_by: ""
+
+providers:
+  llm: "gemini-2.5-flash"
+  tts: "sarvam-bulbul-v2"
+  image_gen_primary: "openrouter/google/gemini-2.5-flash-image"
+  image_gen_fallback: "openai/dall-e-3"
+  broll_primary: "pexels"
+  broll_secondary: "archive_org"
+  composition: "ffmpeg"
+
+output:
+  format: "H.264"
+  resolution: "1920x1080"
+  aspect: "16:9"
+  container: "mp4"

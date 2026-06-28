@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { api } from '@/lib/api'
+import { TopicDiscovery } from '@/components/TopicDiscovery'
 
 const ACCENT = '#22c55e'
 
@@ -46,6 +47,7 @@ export default function NewShortsCasePage() {
         subject_name: form.subject_name || undefined,
         tier: parseInt(form.tier),
         channel_profile_id: form.channel_profile_id || undefined,
+        extra: { case_type: 'shorts' },
       })
       router.push(`/shorts/${form.slug || toSlug(form.name)}`)
     } catch (e) {
@@ -56,18 +58,28 @@ export default function NewShortsCasePage() {
   }
 
   const fields: Array<{ key: keyof typeof form; label: string; placeholder: string; required?: boolean }> = [
-    { key: 'name', label: 'Case Name', placeholder: 'Jessica Lall Murder Case', required: true },
+    { key: 'name', label: 'Case Name', placeholder: 'e.g. Moon Landing 1969, Nirbhaya Case, Elon Musk Biography', required: true },
     { key: 'slug', label: 'Slug', placeholder: 'jessica-lall-murder-case' },
     { key: 'subject_name', label: 'Subject Name', placeholder: 'e.g. the person, product, or topic this is about' },
     { key: 'location', label: 'Location', placeholder: 'New Delhi' },
-    { key: 'year_of_crime', label: 'Year', placeholder: '1999' },
+    { key: 'year_of_crime', label: 'Year (of event, birth, founding, etc.)', placeholder: '1999' },
   ]
+
+  const selectedProfile = profiles.find(p => p.id === form.channel_profile_id)
+  const language = selectedProfile?.language || 'en'
 
   return (
     <div className="p-6 max-w-lg">
       <h1 className="text-xl font-semibold text-[#e0e0e0] mb-6">
         New Case — <span style={{ color: ACCENT }}>Shorts Studio</span>
       </h1>
+      <div className="mb-4">
+        <TopicDiscovery
+          language={language}
+          accentColor={ACCENT}
+          onSelect={title => set('name', title)}
+        />
+      </div>
       <form onSubmit={submit} className="flex flex-col gap-4">
         {fields.map(({ key, label, placeholder, required }) => (
           <div key={key}>
@@ -84,18 +96,20 @@ export default function NewShortsCasePage() {
             />
           </div>
         ))}
-        <div>
-          <label className="block text-xs text-[#888] mb-1">Channel Profile (niche + language)</label>
-          <select
-            value={form.channel_profile_id}
-            onChange={e => set('channel_profile_id', e.target.value)}
-            className="w-full bg-[#111] border border-[#333] rounded-lg px-3 py-2 text-sm text-[#e0e0e0] focus:outline-none"
-          >
-            {profiles.map(p => (
-              <option key={p.id} value={p.id}>{p.name} ({p.language})</option>
-            ))}
-          </select>
-        </div>
+        {profiles.length > 1 && (
+          <div>
+            <label className="block text-xs text-[#888] mb-1">Channel Profile (niche + language)</label>
+            <select
+              value={form.channel_profile_id}
+              onChange={e => set('channel_profile_id', e.target.value)}
+              className="w-full bg-[#111] border border-[#333] rounded-lg px-3 py-2 text-sm text-[#e0e0e0] focus:outline-none"
+            >
+              {profiles.map(p => (
+                <option key={p.id} value={p.id}>{p.name} ({p.language})</option>
+              ))}
+            </select>
+          </div>
+        )}
         <div>
           <label className="block text-xs text-[#888] mb-1">Priority Tier</label>
           <select

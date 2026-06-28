@@ -15,12 +15,12 @@ from src.db.models import Article
 load_dotenv()
 
 RSS_FEEDS: dict[str, str] = {
-    "ndtv": "https://feeds.feedburner.com/ndtvnews-crime",
+    "ndtv": "https://feeds.feedburner.com/ndtvnews-top-stories",
     "toi": "https://timesofindia.indiatimes.com/rssfeedstopstories.cms",
     "indian_express": "https://indianexpress.com/section/india/feed/",
     "the_hindu": "https://www.thehindu.com/news/national/?service=rss",
     "india_today": "https://www.indiatoday.in/rss/1206513",
-    "hindustan_times": "https://www.hindustantimes.com/feeds/rss/crime/rssfeed.xml",
+    "hindustan_times": "https://www.hindustantimes.com/rss/topnews/rssfeed.xml",
     "scroll": "https://scroll.in/feed",
     "the_wire": "https://thewire.in/feed",
     "livelaw": "https://www.livelaw.in/feed",
@@ -38,50 +38,6 @@ HIGH_SCORE_KEYWORDS: list[str] = [
     "Supreme Court",
     "High Court",
     "sentenced",
-]
-
-CRIME_KEYWORDS: list[str] = [
-    "murder",
-    "rape",
-    "scam",
-    "fraud",
-    "arrested",
-    "conviction",
-    "sentenced",
-    "crime",
-    "criminal",
-    "police",
-    "court",
-    "accused",
-    "victim",
-    "assault",
-    "robbery",
-    "theft",
-    "kidnap",
-    "abduction",
-    "extortion",
-    "corruption",
-    "bribery",
-    "trafficking",
-    "drug",
-    "narcotics",
-    "terror",
-    "blast",
-    "attack",
-    "shooting",
-    "stabbing",
-    "killing",
-    "dead",
-    "death",
-    "FIR",
-    "chargesheet",
-    "bail",
-    "verdict",
-    "acquittal",
-    "CBI",
-    "ED",
-    "NIA",
-    "IPC",
 ]
 
 _SOURCE_QUALITY: dict[str, float] = {
@@ -193,9 +149,10 @@ class RSSMonitor:
 
         return round(min(score, 1.0), 4)
 
-    def is_crime_article(self, article: dict) -> bool:
-        text = _article_text(article).lower()
-        return any(kw.lower() in text for kw in CRIME_KEYWORDS)
+    def is_relevant_article(self, article: dict) -> bool:
+        title = (article.get("title") or "").strip()
+        description = (article.get("summary") or article.get("content") or "").strip()
+        return bool(title or description)
 
     def dedup(self, articles: list[dict]) -> list[dict]:
         seen_urls: set[str] = set()
@@ -235,10 +192,10 @@ class RSSMonitor:
 
     def run(self, db_session) -> int:
         raw = self.fetch_all()
-        crime_only = [a for a in raw if self.is_crime_article(a)]
-        logger.info(f"Crime articles after filter: {len(crime_only)}")
+        relevant = [a for a in raw if self.is_relevant_article(a)]
+        logger.info(f"Relevant articles after filter: {len(relevant)}")
 
-        deduped = self.dedup(crime_only)
+        deduped = self.dedup(relevant)
 
         new_count = 0
         for article in deduped:

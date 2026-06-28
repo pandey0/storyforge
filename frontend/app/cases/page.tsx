@@ -6,6 +6,20 @@ import { statusColor, PIPELINE_STEPS } from '@/lib/pipeline'
 import { CaseListSkeleton } from '@/components/Skeleton'
 import { useState } from 'react'
 
+const STATUS_LABELS: Record<string, string> = {
+  queued: 'Queued',
+  research: 'Researching',
+  scripting: 'Writing Script',
+  human_review: 'Awaiting Review',
+  tts: 'Generating Audio',
+  broll: 'Gathering Footage',
+  assembling: 'Assembling Video',
+  thumbnail: 'Making Thumbnail',
+  publishing: 'Publishing',
+  published: 'Published',
+  failed: 'Failed',
+}
+
 export default function CasesPage() {
   const { cases, isLoading } = useCases()
   const [filter, setFilter] = useState('all')
@@ -20,7 +34,7 @@ export default function CasesPage() {
           <select value={filter} onChange={e => setFilter(e.target.value)}
             className="bg-[#111] border border-[#333] rounded-lg px-3 py-1.5 text-xs text-[#e0e0e0] focus:outline-none focus:border-[#3b82f6]">
             <option value="all">All Statuses</option>
-            {PIPELINE_STEPS.map(s => <option key={s} value={s}>{s}</option>)}
+            {PIPELINE_STEPS.map(s => <option key={s} value={s}>{STATUS_LABELS[s] ?? s}</option>)}
           </select>
         </div>
       </div>
@@ -46,7 +60,7 @@ export default function CasesPage() {
                 <div className="flex items-center gap-3">
                   <span className="text-[10px] px-2 py-0.5 rounded-full"
                     style={{ backgroundColor: `${statusColor(c.status)}22`, color: statusColor(c.status) }}>
-                    {c.status}
+                    {STATUS_LABELS[c.status] ?? c.status}
                   </span>
                   {c.updated_at && (
                     <span className="text-[10px] text-[#555]">
