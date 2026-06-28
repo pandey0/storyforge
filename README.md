@@ -1,6 +1,6 @@
 # StoryForge
 
-Automated content production engine. Research a subject → produce two independent product lines: **long-form documentaries** (30–45 min, 16:9) and **shorts** (7 episodic 9:16 reels). Not tied to one niche or language — what genre, voice, structure, and language gets produced is configured per **ChannelProfile** (a DB row), never hardcoded.
+Automated content production engine. Research a subject → produce two independent product lines: **long-form documentaries** (30–45 min, 16:9) and **shorts** (episodic 9:16 reels, count and topics planned dynamically per case by Gemini). Not tied to one niche or language — what genre, voice, structure, and language gets produced is configured per **ChannelProfile** (a DB row), never hardcoded.
 
 **Current seeded profile:** `indian-true-crime-hindi` — Hindi-language Indian true crime, journalistic + warm documentary style.
 
@@ -19,8 +19,8 @@ research.json  (shared — only thing both tracks read)
        │     → video_final.mp4 (16:9, 30–45 min)
        │
        └── SHORTS TRACK (independent, per-episode)
-             shorts_script → TTS → scene_images → assemble
-             → 7× {topic}.mp4 (9:16, 60–90 s)
+             episode_planner → shorts_script → TTS → scene_images → assemble
+             → N× {topic}.mp4 (9:16, 60–90 s, N planned per-case by Gemini)
 ```
 
 Neither track depends on the other's output. Either can run alone after `research` + `characters` complete.
@@ -59,7 +59,8 @@ Neither track depends on the other's output. Either can run alone after `researc
 | `thumbnail_agent.py` | AI image + Pillow text overlay |
 | `publish_agent.py` | YouTube Data API v3 upload + schedule |
 | `analytics_agent.py` | YT analytics sync → DB |
-| `shorts_script_agent.py` | 7 standalone episode scripts from `research.json` |
+| `episode_planner_agent.py` | Decides episode count + topics per case via Gemini (reads `research.json` + profile planner prompt) |
+| `shorts_script_agent.py` | Writes each episode script from the planned episode cards |
 | `scene_image_agent.py` | Per-segment AI scene images (character + narration context) |
 | `shorts_assembler_agent.py` | Per-episode 9:16 assembly: blur-box, captions, scene overlay |
 

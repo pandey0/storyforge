@@ -3,7 +3,7 @@
 ## Project Identity
 General-purpose content production engine: research a subject → produce TWO
 independent product lines: long-form documentaries (30–45 min) and shorts
-(7 episodic 9:16 reels per case). NOT tied to one niche or language — what
+(episodic 9:16 reels, count+topics planned dynamically per case by EpisodePlannerAgent). NOT tied to one niche or language — what
 genre/voice/structure/language gets produced is configured per **ChannelProfile**
 (a DB row), not hardcoded in agent code. Single-operator tool, built with
 SaaS-shaped internals — see `docs/SAAS_DESIGN.md`, read before designing any
@@ -100,7 +100,8 @@ video_producer_agent.py     longform: ffmpeg assembly, 16:9
 thumbnail_agent.py          DALL-E 3 + Pillow overlay
 publish_agent.py            YouTube upload + schedule
 analytics_agent.py          YT analytics → DB sync
-shorts_script_agent.py      shorts: 7 standalone episode scripts from research.json
+episode_planner_agent.py    shorts: decides episode count + topics per case via Gemini
+shorts_script_agent.py      shorts: writes each episode script from planned episode cards
 shorts_assembler_agent.py   shorts: per-episode 9:16 assembly (blur-box, captions, scene overlay)
 scene_image_agent.py        shorts: per-segment DALL-E scene images (character + narration context)
 ```
