@@ -38,18 +38,13 @@ def _structural_check(research: dict) -> tuple[bool, str]:
     )
 
     sources = research.get("sources") or {}
-    wiki = sources.get("wikipedia") or {}
-    has_wiki = bool(
-        isinstance(wiki, dict)
-        and ((wiki.get("extract_summary") or "").strip() or (wiki.get("extract_full") or "").strip())
-    )
-    has_news = bool(sources.get("news_archive"))
-    has_kanoon = bool(sources.get("indian_kanoon"))
+    has_uploads = bool(sources.get("uploads"))
 
-    if not (has_summary_content or has_wiki or has_news or has_kanoon):
+    if not (has_summary_content or has_uploads):
         return False, (
-            "research has a case_name but no real content — "
-            "summary fields, wikipedia extract, news_archive, and indian_kanoon are all empty"
+            "research has a case_name but no content — "
+            "summary fields are empty and no uploaded documents found. "
+            "Upload research files via the case dashboard before running this step."
         )
 
     return True, ""

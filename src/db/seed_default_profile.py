@@ -114,13 +114,11 @@ SECTION_HEADERS = [
 
 CASE_PROMPT_TEMPLATE = (
     "मामला: {case_name}\n"
-    "पीड़ित: {subject_name}, {subject_age} वर्ष, {subject_role}\n"
+    "विषय: {subject_name}, {subject_age} वर्ष, {subject_role}\n"
     "वर्ष: {year}\n"
     "स्थान: {location}\n"
-    "\nशोध डेटा:\n"
-    "--- Wikipedia ---\n{wikipedia_extract}\n\n"
-    "--- अदालती निर्णय (Indian Kanoon) ---\n{judgments_text}\n\n"
-    "--- समाचार संग्रह ---\n{articles_text}\n"
+    "\nशोध सामग्री:\n"
+    "--- अपलोड किए गए दस्तावेज़ ---\n{uploads_text}\n\n"
     "{fix_section}"
     "{base_instruction}"
 )
@@ -268,7 +266,12 @@ def seed():
     with get_session() as session:
         existing = session.query(ChannelProfile).filter_by(slug="indian-true-crime-hindi").first()
         if existing:
-            print(f"Profile 'indian-true-crime-hindi' already exists (id={existing.id}) — skipping")
+            # Always update the prompt templates so code changes take effect on existing rows
+            existing.case_prompt_template = CASE_PROMPT_TEMPLATE
+            existing.voice_system_prompt = VOICE_SYSTEM_PROMPT
+            existing.shorts_episode_prompt_template = SHORTS_EPISODE_PROMPT_TEMPLATE
+            session.flush()
+            print(f"Updated prompt templates on 'indian-true-crime-hindi' (id={existing.id})")
             return existing.id
 
         profile = ChannelProfile(

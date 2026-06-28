@@ -101,25 +101,14 @@ class ScriptWriterAgent:
 
         sources = research.get("sources", {})
 
-        wiki = sources.get("wikipedia", {}) or {}
-        wikipedia_raw: str = wiki.get("extract_full") or wiki.get("extract_summary") or ""
-        wikipedia_extract = wikipedia_raw[:3000]
-
-        judgments = sources.get("indian_kanoon", []) or []
-        judgment_blocks: list[str] = []
-        for j in judgments[:3]:
-            title = j.get("title", "अज्ञात निर्णय")
-            headline = j.get("headline", j.get("content", ""))[:500]
-            judgment_blocks.append(f"शीर्षक: {title}\n{headline}")
-        judgments_text = "\n\n".join(judgment_blocks) if judgment_blocks else "कोई अदालती निर्णय उपलब्ध नहीं।"
-
-        articles = sources.get("news_archive", []) or []
-        article_blocks: list[str] = []
-        for a in articles[:5]:
-            title = a.get("title", "अज्ञात")
-            content_preview = (a.get("content", "") or "")[:200]
-            article_blocks.append(f"- {title}\n  {content_preview}")
-        articles_text = "\n\n".join(article_blocks) if article_blocks else "कोई समाचार लेख उपलब्ध नहीं।"
+        uploads = sources.get("uploads") or []
+        if uploads:
+            uploads_text = "\n\n---\n\n".join(
+                f"[{doc.get('filename', 'doc')}]\n{doc.get('text', '')[:2000]}"
+                for doc in uploads[:6]
+            )
+        else:
+            uploads_text = "कोई शोध सामग्री अपलोड नहीं की गई।"
 
         fix_section = ""
         if fix_notes:
@@ -152,9 +141,7 @@ class ScriptWriterAgent:
             subject_role=subject_role,
             year=year,
             location=location,
-            wikipedia_extract=wikipedia_extract,
-            judgments_text=judgments_text,
-            articles_text=articles_text,
+            uploads_text=uploads_text,
             fix_section=fix_section,
             base_instruction=base_instruction,
         )

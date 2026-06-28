@@ -84,23 +84,12 @@ def _research_context(research: dict) -> str:
     elif isinstance(summary, str) and summary:
         parts.append(f"SUMMARY:\n{summary}")
 
-    wiki = sources.get("wikipedia") or {}
-    wiki_text = wiki.get("extract_full") or wiki.get("extract_summary")
-    if wiki_text:
-        parts.append(f"WIKIPEDIA:\n{wiki_text}")
-
-    news = sources.get("news_archive") or []
-    if news:
-        lines = [f"- {a.get('title','')}: {a.get('content','')}" for a in news]
-        parts.append("NEWS ARCHIVE:\n" + "\n".join(lines))
-
-    judgments = sources.get("indian_kanoon") or []
-    if judgments:
-        lines = [
-            f"- {d.get('title') or d.get('headline','')} ({d.get('court','')}, {d.get('date','')})"
-            for d in judgments
-        ]
-        parts.append("COURT JUDGMENTS:\n" + "\n".join(lines))
+    uploads = sources.get("uploads") or []
+    for doc in uploads[:6]:
+        text = doc.get("text", "")[:3000]
+        fname = doc.get("filename", "doc")
+        if text:
+            parts.append(f"UPLOADED [{fname}]:\n{text}")
 
     cbi = sources.get("cbi_press") or []
     if cbi:

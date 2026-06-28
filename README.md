@@ -157,8 +157,6 @@ Fill in `.env`:
 | `OPENROUTER_API_KEY` | [openrouter.ai](https://openrouter.ai) | Yes (scene images) |
 | `PEXELS_API_KEY` | [pexels.com/api](https://www.pexels.com/api/) | Yes (b-roll) |
 | `OPENAI_API_KEY` | [platform.openai.com](https://platform.openai.com) | Optional (thumbnails) |
-| `NEWS_API_KEY` | [newsapi.org](https://newsapi.org) | Optional |
-| `INDIAN_KANOON_TOKEN` | [indiankanoon.org/api](https://indiankanoon.org/api/) | Optional |
 | `YOUTUBE_CLIENT_ID/SECRET/REFRESH_TOKEN` | Google Cloud Console → YouTube Data API v3 | Optional (publish) |
 
 ### 4. Database init + seed
